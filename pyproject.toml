@@ -1,0 +1,48 @@
+[project]
+name = "ga4-cli"
+version = "0.1.0"
+description = "Google Analytics 4 reporting and data analysis"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+    { name = "Mack" }
+]
+dependencies = [
+    "typer>=0.9.0",
+    "rich>=13.0.0",
+    "httpx>=0.25.0",
+    "keyring>=24.0.0",
+    "python-dotenv>=1.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "ruff>=0.3.0",
+]
+
+[project.scripts]
+ga4 = "ga4.cli:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ga4"]
+
+[tool.fabric]
+description = "Google Analytics 4 reporting and data analysis"
+resources = ["properties", "reports", "dimensions", "metrics"]
+auth = "oauth2"
+status = "experimental"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

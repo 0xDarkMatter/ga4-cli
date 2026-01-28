@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(copier copy:*)",
+      "Bash(.venv/Scripts/ga4.exe:*)"
+    ]
+  }
+}
