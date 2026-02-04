@@ -369,3 +369,80 @@ class AdminClient:
             }
             for b in created
         ]
+
+    # --- Account-Level Access Binding Methods ---
+
+    def create_account_access_binding(self, account_id: str, email: str, role: str) -> dict:
+        """Add a user to an account with specified role.
+
+        Account-level access cascades to all properties under the account.
+
+        Args:
+            account_id: Account ID (e.g., "123456789")
+            email: User email address
+            role: Role name (viewer, analyst, editor, admin)
+
+        Returns:
+            Created access binding dict
+        """
+        if role.lower() not in ROLES:
+            raise ValueError(f"Invalid role: {role}. Must be one of: {', '.join(ROLES.keys())}")
+
+        api_role = ROLES[role.lower()]
+
+        # Ensure proper format
+        if not account_id.startswith("accounts/"):
+            account_id = f"accounts/{account_id}"
+
+        data = self._post_alpha(
+            f"{account_id}/accessBindings",
+            {
+                "user": email,
+                "roles": [api_role],
+            },
+        )
+
+        return {
+            "id": data.get("name", "").split("/")[-1],
+            "user": data.get("user", ""),
+            "roles": [ROLE_DISPLAY.get(r, r) for r in data.get("roles", [])],
+            "name": data.get("name", ""),
+            "account": account_id,
+        }
+
+    def list_account_access_bindings(self, account_id: str) -> list:
+        """List users with access to an account.
+
+        Args:
+            account_id: Account ID (e.g., "123456789")
+
+        Returns:
+            List of access binding dicts
+        """
+        if not account_id.startswith("accounts/"):
+            account_id = f"accounts/{account_id}"
+
+        all_bindings = []
+        page_token = None
+
+        while True:
+            params = {"pageSize": 200}
+            if page_token:
+                params["pageToken"] = page_token
+
+            data = self._get_alpha(f"{account_id}/accessBindings", params)
+            all_bindings.extend(data.get("accessBindings", []))
+
+            page_token = data.get("nextPageToken")
+            if not page_token:
+                break
+
+        return [
+            {
+                "id": b.get("name", "").split("/")[-1],
+                "user": b.get("user", ""),
+                "roles": [ROLE_DISPLAY.get(r, r) for r in b.get("roles", [])],
+                "name": b.get("name", ""),
+            }
+            for b in all_bindings
+        ]
