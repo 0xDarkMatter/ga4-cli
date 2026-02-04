@@ -59,22 +59,48 @@ ga4 users list <property-id>
 
 **Roles:** `viewer`, `analyst`, `editor`, `admin`
 
-### Reports, Dimensions, Metrics
+### Reports
 
 | Command | Description |
 |---------|-------------|
-| `ga4 reports list [--json]` | List reports |
-| `ga4 reports get <id> [--json]` | Get specific report |
-| `ga4 dimensions list [--json]` | List dimensions |
-| `ga4 dimensions get <id> [--json]` | Get specific dimension |
-| `ga4 metrics list [--json]` | List metrics |
-| `ga4 metrics get <id> [--json]` | Get specific metric |
+| `ga4 reports run <property-id> [OPTIONS]` | Run a custom report |
+| `ga4 reports realtime <property-id> [OPTIONS]` | Run a realtime report |
+
+**Report Options:**
+- `-d, --dimensions` - Dimensions (comma-separated, default: date)
+- `-m, --metrics` - Metrics (comma-separated, default: activeUsers,sessions)
+- `--from` - Start date (YYYY-MM-DD or relative like "30daysAgo")
+- `--to` - End date (YYYY-MM-DD or relative like "today")
+- `-n, --limit` - Max rows (default: 100)
+- `-o, --order-by` - Sort by dimension or metric
+- `--asc` - Sort ascending (default: descending)
+
+### Dimensions & Metrics
+
+| Command | Description |
+|---------|-------------|
+| `ga4 dimensions list <property-id> [--json]` | List available dimensions |
+| `ga4 dimensions get <property-id> <api-name> [--json]` | Get dimension details |
+| `ga4 metrics list <property-id> [--json]` | List available metrics |
+| `ga4 metrics get <property-id> <api-name> [--json]` | Get metric details |
 
 ## Usage Examples
 
 ```bash
 # List properties and filter with jq
 ga4 properties list --json | jq '.data[0]'
+
+# Run a report
+ga4 reports run 123456789 -d date -m activeUsers,sessions
+ga4 reports run 123456789 -d date,city -m sessions --from 2025-01-01 --to 2025-01-31
+ga4 reports run 123456789 --json | jq '.data.rows'
+
+# Realtime report
+ga4 reports realtime 123456789 -d country -m activeUsers
+
+# List available dimensions and metrics
+ga4 dimensions list 123456789
+ga4 metrics list 123456789 --category User
 
 # Add user to property
 ga4 users add 123456789 user@example.com --role analyst

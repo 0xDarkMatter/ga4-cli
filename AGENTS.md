@@ -41,16 +41,23 @@ Google Analytics 4 reporting and user management CLI.
 
 **Note:** Access can be at Account or Property level. Property-level lists may be empty if access is granted at Account level.
 
-### Reports, Dimensions, Metrics
+### Reports
 
 | Command | Description |
 |---------|-------------|
-| `ga4 reports list [--json]` | List reports |
-| `ga4 reports get <id> [--json]` | Get specific report |
-| `ga4 dimensions list [--json]` | List dimensions |
-| `ga4 dimensions get <id> [--json]` | Get specific dimension |
-| `ga4 metrics list [--json]` | List metrics |
-| `ga4 metrics get <id> [--json]` | Get specific metric |
+| `ga4 reports run <property-id> [OPTIONS]` | Run a custom report |
+| `ga4 reports realtime <property-id> [OPTIONS]` | Run a realtime report |
+
+**Report Options:** `-d dimensions`, `-m metrics`, `--from`, `--to`, `-n limit`, `-o order-by`, `--asc`
+
+### Dimensions & Metrics
+
+| Command | Description |
+|---------|-------------|
+| `ga4 dimensions list <property-id> [--json]` | List available dimensions |
+| `ga4 dimensions get <property-id> <api-name>` | Get dimension details |
+| `ga4 metrics list <property-id> [--json]` | List available metrics |
+| `ga4 metrics get <property-id> <api-name>` | Get metric details |
 
 ## Authentication
 
@@ -107,6 +114,43 @@ ga4 properties list --account 123456789
 
 # Get property details
 ga4 properties get 987654321 --json
+```
+
+### Reports
+
+```bash
+# Run a basic report (last 30 days)
+ga4 reports run 123456789
+
+# Custom dimensions and metrics
+ga4 reports run 123456789 -d date,city -m activeUsers,sessions
+
+# Date range
+ga4 reports run 123456789 --from 2025-01-01 --to 2025-01-31
+
+# Sort by metric
+ga4 reports run 123456789 -d city -m sessions -o sessions
+
+# Realtime data
+ga4 reports realtime 123456789 -d country -m activeUsers
+
+# JSON output for scripting
+ga4 reports run 123456789 --json | jq '.data.rows[] | select(.sessions > "100")'
+```
+
+### Dimensions & Metrics Discovery
+
+```bash
+# List all dimensions for a property
+ga4 dimensions list 123456789
+
+# Filter by category
+ga4 dimensions list 123456789 --category User
+ga4 metrics list 123456789 --category Session
+
+# Get details for a specific dimension/metric
+ga4 dimensions get 123456789 city
+ga4 metrics get 123456789 activeUsers
 ```
 
 ## Exit Codes

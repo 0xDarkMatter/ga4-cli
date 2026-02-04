@@ -12,7 +12,7 @@ from rich.console import Console
 from rich.table import Table
 
 from . import __version__
-from .client import Client
+from .client import DataClient
 
 from .config import get_tokens, clear_credentials, get_auth_status, run_oauth_flow
 
@@ -326,80 +326,133 @@ reports_app = typer.Typer(help="Report operations")
 app.add_typer(reports_app, name="reports")
 
 
-@reports_app.command("list")
-def reports_list(
-    limit: Annotated[int, typer.Option("--limit", "-n", help="Max results")] = 20,
+@reports_app.command("run")
+def reports_run(
+    property_id: Annotated[str, typer.Argument(help="Property ID")],
+    dimensions: Annotated[str, typer.Option("--dimensions", "-d", help="Dimensions (comma-separated)")] = "date",
+    metrics: Annotated[str, typer.Option("--metrics", "-m", help="Metrics (comma-separated)")] = "activeUsers,sessions",
+    start_date: Annotated[str, typer.Option("--from", help="Start date (YYYY-MM-DD or relative)")] = "30daysAgo",
+    end_date: Annotated[str, typer.Option("--to", help="End date (YYYY-MM-DD or relative)")] = "today",
+    limit: Annotated[int, typer.Option("--limit", "-n", help="Max rows")] = 100,
+    order_by: Annotated[Optional[str], typer.Option("--order-by", "-o", help="Sort by dimension or metric")] = None,
+    ascending: Annotated[bool, typer.Option("--asc", help="Sort ascending (default: descending)")] = False,
     json_output: Annotated[bool, typer.Option("--json", help="Output as JSON")] = False,
 ):
     """
-    List reports.
+    Run a custom report with specified dimensions and metrics.
 
     Examples:
-        ga4 reports list
-        ga4 reports list --limit 10
-        ga4 reports list --json | jq '.data[0]'
+        ga4 reports run 123456789
+        ga4 reports run 123456789 -d date,city -m activeUsers,sessions
+        ga4 reports run 123456789 --from 2025-01-01 --to 2025-01-31
+        ga4 reports run 123456789 -d date -m sessions --order-by sessions
+        ga4 reports run 123456789 --json | jq '.data.rows'
     """
     _require_auth(json_output)
 
-    client = Client()
-    items = client.list_reports(limit=limit)
+    # Parse comma-separated values
+    dim_list = [d.strip() for d in dimensions.split(",") if d.strip()]
+    metric_list = [m.strip() for m in metrics.split(",") if m.strip()]
+
+    if not dim_list:
+        _error("At least one dimension is required", "VALIDATION_ERROR", EXIT_VALIDATION, as_json=json_output)
+    if not metric_list:
+        _error("At least one metric is required", "VALIDATION_ERROR", EXIT_VALIDATION, as_json=json_output)
+
+    client = DataClient()
+    try:
+        report = client.run_report(
+            property_id=property_id,
+            dimensions=dim_list,
+            metrics=metric_list,
+            start_date=start_date,
+            end_date=end_date,
+            limit=limit,
+            order_by=order_by,
+            descending=not ascending,
+        )
+    except Exception as e:
+        _error(f"Failed to run report: {e}", "API_ERROR", EXIT_ERROR, as_json=json_output)
 
     if json_output:
         _output_json({
-            "data": items,
-            "meta": {"count": len(items)},
+            "data": report,
+            "meta": {
+                "property_id": property_id,
+                "date_range": {"start": start_date, "end": end_date},
+            },
         })
         return
 
-    if not items:
-        console.print("[yellow]No reports found[/yellow]")
+    if not report.get("rows"):
+        console.print("[yellow]No data found for the specified criteria[/yellow]")
         return
 
-    table = Table(title="Reports")
-    table.add_column("ID")
-    table.add_column("Name")
+    # Build table with all columns
+    table = Table(title=f"Report for Property {property_id}")
+    all_headers = report["dimension_headers"] + report["metric_headers"]
+    for header in all_headers:
+        table.add_column(header)
 
-    for item in items:
-        table.add_row(str(item.get("id", "")), item.get("name", ""))
+    for row in report["rows"]:
+        table.add_row(*[str(row.get(h, "")) for h in all_headers])
 
     console.print(table)
+    console.print(f"\n[dim]Showing {len(report['rows'])} of {report['row_count']} rows[/dim]")
 
 
-@reports_app.command("get")
-def reports_get(
-    report_id: Annotated[str, typer.Argument(help="Report ID")],
+@reports_app.command("realtime")
+def reports_realtime(
+    property_id: Annotated[str, typer.Argument(help="Property ID")],
+    dimensions: Annotated[str, typer.Option("--dimensions", "-d", help="Dimensions (comma-separated)")] = "country",
+    metrics: Annotated[str, typer.Option("--metrics", "-m", help="Metrics (comma-separated)")] = "activeUsers",
+    limit: Annotated[int, typer.Option("--limit", "-n", help="Max rows")] = 100,
     json_output: Annotated[bool, typer.Option("--json", help="Output as JSON")] = False,
 ):
     """
-    Get a specific report by ID.
+    Run a realtime report.
 
     Examples:
-        ga4 reports get abc123
-        ga4 reports get abc123 --json
+        ga4 reports realtime 123456789
+        ga4 reports realtime 123456789 -d country,city -m activeUsers
+        ga4 reports realtime 123456789 --json
     """
     _require_auth(json_output)
 
-    client = Client()
-    item = client.get_report(report_id)
+    dim_list = [d.strip() for d in dimensions.split(",") if d.strip()]
+    metric_list = [m.strip() for m in metrics.split(",") if m.strip()]
 
-    if item is None:
-        _error(
-            f"Report not found: {report_id}",
-            "NOT_FOUND",
-            EXIT_NOT_FOUND,
-            {"report_id": report_id},
-            json_output,
+    client = DataClient()
+    try:
+        report = client.run_realtime_report(
+            property_id=property_id,
+            dimensions=dim_list,
+            metrics=metric_list,
+            limit=limit,
         )
+    except Exception as e:
+        _error(f"Failed to run realtime report: {e}", "API_ERROR", EXIT_ERROR, as_json=json_output)
 
     if json_output:
-        _output_json({"data": item})
+        _output_json({
+            "data": report,
+            "meta": {"property_id": property_id, "realtime": True},
+        })
         return
 
-    console.print(f"[bold]{item.get('name', 'Unknown')}[/bold]")
-    console.print(f"  ID: {item.get('id')}")
-    for key, value in item.items():
-        if key not in ("id", "name"):
-            console.print(f"  {key}: {value}")
+    if not report.get("rows"):
+        console.print("[yellow]No realtime data available[/yellow]")
+        return
+
+    table = Table(title=f"Realtime Report for Property {property_id}")
+    all_headers = report["dimension_headers"] + report["metric_headers"]
+    for header in all_headers:
+        table.add_column(header)
+
+    for row in report["rows"]:
+        table.add_row(*[str(row.get(h, "")) for h in all_headers])
+
+    console.print(table)
 
 
 
@@ -411,26 +464,36 @@ app.add_typer(dimensions_app, name="dimensions")
 
 @dimensions_app.command("list")
 def dimensions_list(
-    limit: Annotated[int, typer.Option("--limit", "-n", help="Max results")] = 20,
+    property_id: Annotated[str, typer.Argument(help="Property ID")],
+    limit: Annotated[int, typer.Option("--limit", "-n", help="Max results")] = 50,
+    category: Annotated[Optional[str], typer.Option("--category", "-c", help="Filter by category")] = None,
     json_output: Annotated[bool, typer.Option("--json", help="Output as JSON")] = False,
 ):
     """
-    List dimensions.
+    List available dimensions for a property.
 
     Examples:
-        ga4 dimensions list
-        ga4 dimensions list --limit 10
-        ga4 dimensions list --json | jq '.data[0]'
+        ga4 dimensions list 123456789
+        ga4 dimensions list 123456789 --limit 100
+        ga4 dimensions list 123456789 --category User
+        ga4 dimensions list 123456789 --json | jq '.data[0]'
     """
     _require_auth(json_output)
 
-    client = Client()
-    items = client.list_dimensions(limit=limit)
+    client = DataClient()
+    try:
+        items = client.list_dimensions(property_id, limit=limit)
+    except Exception as e:
+        _error(f"Failed to list dimensions: {e}", "API_ERROR", EXIT_ERROR, as_json=json_output)
+
+    # Filter by category if specified
+    if category:
+        items = [i for i in items if category.lower() in i.get("category", "").lower()]
 
     if json_output:
         _output_json({
             "data": items,
-            "meta": {"count": len(items)},
+            "meta": {"count": len(items), "property_id": property_id},
         })
         return
 
@@ -438,39 +501,48 @@ def dimensions_list(
         console.print("[yellow]No dimensions found[/yellow]")
         return
 
-    table = Table(title="Dimensions")
-    table.add_column("ID")
-    table.add_column("Name")
+    table = Table(title=f"Dimensions for Property {property_id}")
+    table.add_column("API Name")
+    table.add_column("Display Name")
+    table.add_column("Category")
 
     for item in items:
-        table.add_row(str(item.get("id", "")), item.get("name", ""))
+        table.add_row(
+            item.get("api_name", ""),
+            item.get("name", ""),
+            item.get("category", ""),
+        )
 
     console.print(table)
 
 
 @dimensions_app.command("get")
 def dimensions_get(
-    dimension_id: Annotated[str, typer.Argument(help="Dimension ID")],
+    property_id: Annotated[str, typer.Argument(help="Property ID")],
+    api_name: Annotated[str, typer.Argument(help="Dimension API name (e.g., 'city', 'date')")],
     json_output: Annotated[bool, typer.Option("--json", help="Output as JSON")] = False,
 ):
     """
-    Get a specific dimension by ID.
+    Get details for a specific dimension.
 
     Examples:
-        ga4 dimensions get abc123
-        ga4 dimensions get abc123 --json
+        ga4 dimensions get 123456789 city
+        ga4 dimensions get 123456789 date --json
     """
     _require_auth(json_output)
 
-    client = Client()
-    item = client.get_dimension(dimension_id)
+    client = DataClient()
+    try:
+        item = client.get_dimension(property_id, api_name)
+    except Exception as e:
+        _error(f"Failed to get dimension: {e}", "API_ERROR", EXIT_ERROR, as_json=json_output)
 
     if item is None:
         _error(
-            f"Dimension not found: {dimension_id}",
+            f"Dimension not found: {api_name}",
             "NOT_FOUND",
             EXIT_NOT_FOUND,
-            {"dimension_id": dimension_id},
+            {"api_name": api_name, "property_id": property_id},
             json_output,
         )
 
@@ -479,10 +551,10 @@ def dimensions_get(
         return
 
     console.print(f"[bold]{item.get('name', 'Unknown')}[/bold]")
-    console.print(f"  ID: {item.get('id')}")
-    for key, value in item.items():
-        if key not in ("id", "name"):
-            console.print(f"  {key}: {value}")
+    console.print(f"  API Name: {item.get('api_name')}")
+    console.print(f"  Category: {item.get('category', 'N/A')}")
+    if item.get("description"):
+        console.print(f"  Description: {item.get('description')}")
 
 
 
@@ -494,26 +566,36 @@ app.add_typer(metrics_app, name="metrics")
 
 @metrics_app.command("list")
 def metrics_list(
-    limit: Annotated[int, typer.Option("--limit", "-n", help="Max results")] = 20,
+    property_id: Annotated[str, typer.Argument(help="Property ID")],
+    limit: Annotated[int, typer.Option("--limit", "-n", help="Max results")] = 50,
+    category: Annotated[Optional[str], typer.Option("--category", "-c", help="Filter by category")] = None,
     json_output: Annotated[bool, typer.Option("--json", help="Output as JSON")] = False,
 ):
     """
-    List metrics.
+    List available metrics for a property.
 
     Examples:
-        ga4 metrics list
-        ga4 metrics list --limit 10
-        ga4 metrics list --json | jq '.data[0]'
+        ga4 metrics list 123456789
+        ga4 metrics list 123456789 --limit 100
+        ga4 metrics list 123456789 --category User
+        ga4 metrics list 123456789 --json | jq '.data[0]'
     """
     _require_auth(json_output)
 
-    client = Client()
-    items = client.list_metrics(limit=limit)
+    client = DataClient()
+    try:
+        items = client.list_metrics(property_id, limit=limit)
+    except Exception as e:
+        _error(f"Failed to list metrics: {e}", "API_ERROR", EXIT_ERROR, as_json=json_output)
+
+    # Filter by category if specified
+    if category:
+        items = [i for i in items if category.lower() in i.get("category", "").lower()]
 
     if json_output:
         _output_json({
             "data": items,
-            "meta": {"count": len(items)},
+            "meta": {"count": len(items), "property_id": property_id},
         })
         return
 
@@ -521,39 +603,50 @@ def metrics_list(
         console.print("[yellow]No metrics found[/yellow]")
         return
 
-    table = Table(title="Metrics")
-    table.add_column("ID")
-    table.add_column("Name")
+    table = Table(title=f"Metrics for Property {property_id}")
+    table.add_column("API Name")
+    table.add_column("Display Name")
+    table.add_column("Category")
+    table.add_column("Type")
 
     for item in items:
-        table.add_row(str(item.get("id", "")), item.get("name", ""))
+        table.add_row(
+            item.get("api_name", ""),
+            item.get("name", ""),
+            item.get("category", ""),
+            item.get("type", ""),
+        )
 
     console.print(table)
 
 
 @metrics_app.command("get")
 def metrics_get(
-    metric_id: Annotated[str, typer.Argument(help="Metric ID")],
+    property_id: Annotated[str, typer.Argument(help="Property ID")],
+    api_name: Annotated[str, typer.Argument(help="Metric API name (e.g., 'activeUsers', 'sessions')")],
     json_output: Annotated[bool, typer.Option("--json", help="Output as JSON")] = False,
 ):
     """
-    Get a specific metric by ID.
+    Get details for a specific metric.
 
     Examples:
-        ga4 metrics get abc123
-        ga4 metrics get abc123 --json
+        ga4 metrics get 123456789 activeUsers
+        ga4 metrics get 123456789 sessions --json
     """
     _require_auth(json_output)
 
-    client = Client()
-    item = client.get_metric(metric_id)
+    client = DataClient()
+    try:
+        item = client.get_metric(property_id, api_name)
+    except Exception as e:
+        _error(f"Failed to get metric: {e}", "API_ERROR", EXIT_ERROR, as_json=json_output)
 
     if item is None:
         _error(
-            f"Metric not found: {metric_id}",
+            f"Metric not found: {api_name}",
             "NOT_FOUND",
             EXIT_NOT_FOUND,
-            {"metric_id": metric_id},
+            {"api_name": api_name, "property_id": property_id},
             json_output,
         )
 
@@ -562,10 +655,11 @@ def metrics_get(
         return
 
     console.print(f"[bold]{item.get('name', 'Unknown')}[/bold]")
-    console.print(f"  ID: {item.get('id')}")
-    for key, value in item.items():
-        if key not in ("id", "name"):
-            console.print(f"  {key}: {value}")
+    console.print(f"  API Name: {item.get('api_name')}")
+    console.print(f"  Category: {item.get('category', 'N/A')}")
+    console.print(f"  Type: {item.get('type', 'N/A')}")
+    if item.get("description"):
+        console.print(f"  Description: {item.get('description')}")
 
 
 # =============================================================================

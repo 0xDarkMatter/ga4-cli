@@ -1,21 +1,30 @@
-"""ga4 API client."""
+"""Google Analytics Data API client.
+
+Handles report generation and metadata via analyticsdata.googleapis.com.
+"""
 
 from typing import Optional
 
 import httpx
 
-from .config import get_tokens
+from .config import get_tokens, is_token_expired, refresh_credentials
 
 
-class Client:
-    """API client for ga4."""
+class DataClient:
+    """Google Analytics Data API client."""
 
     BASE_URL = "https://analyticsdata.googleapis.com/v1beta"
     TIMEOUT = 30
 
     def __init__(self):
+        self._ensure_valid_token()
         tokens = get_tokens()
         self.token = tokens.get("access_token") if tokens else None
+
+    def _ensure_valid_token(self) -> None:
+        """Refresh token if expired."""
+        if is_token_expired():
+            refresh_credentials()
 
     def _headers(self) -> dict:
         """Get request headers."""
@@ -47,128 +56,241 @@ class Client:
         response.raise_for_status()
         return response.json()
 
+    # --- Metadata Methods ---
 
+    def get_metadata(self, property_id: str) -> dict:
+        """Get all available dimensions and metrics for a property.
 
+        Args:
+            property_id: Property ID (e.g., "123456789")
 
-    def list_properties(self, limit: int = 20) -> list:
-        """List properties."""
-        # TODO: Implement actual API call
-        # data = self._get("properties", {"limit": limit})
-        # return data.get("properties", [])
+        Returns:
+            Dict with 'dimensions' and 'metrics' lists
+        """
+        if not property_id.startswith("properties/"):
+            property_id = f"properties/{property_id}"
 
-        # Placeholder data
+        data = self._get(f"{property_id}/metadata")
+        return data
+
+    def list_dimensions(self, property_id: str, limit: int = 200) -> list:
+        """List available dimensions for a property.
+
+        Args:
+            property_id: Property ID
+            limit: Max results
+
+        Returns:
+            List of dimension dicts
+        """
+        metadata = self.get_metadata(property_id)
+        dimensions = metadata.get("dimensions", [])
+
         return [
-            {"id": "1", "name": "Example Propertie 1"},
-            {"id": "2", "name": "Example Propertie 2"},
-        ][:limit]
+            {
+                "api_name": d.get("apiName", ""),
+                "name": d.get("uiName", ""),
+                "description": d.get("description", ""),
+                "category": d.get("category", ""),
+                "deprecated": d.get("deprecatedApiNames", []),
+            }
+            for d in dimensions[:limit]
+        ]
 
-    def get_propertie(self, propertie_id: str) -> Optional[dict]:
-        """Get single propertie by ID."""
-        # TODO: Implement actual API call
-        # try:
-        #     data = self._get(f"properties/{propertie_id}")
-        #     return data.get("propertie")
-        # except httpx.HTTPStatusError as e:
-        #     if e.response.status_code == 404:
-        #         return None
-        #     raise
+    def list_metrics(self, property_id: str, limit: int = 200) -> list:
+        """List available metrics for a property.
 
-        # Placeholder data
-        if propertie_id in ("1", "2"):
-            return {"id": propertie_id, "name": f"Example Propertie {propertie_id}"}
-        return None
+        Args:
+            property_id: Property ID
+            limit: Max results
 
+        Returns:
+            List of metric dicts
+        """
+        metadata = self.get_metadata(property_id)
+        metrics = metadata.get("metrics", [])
 
-
-
-    def list_reports(self, limit: int = 20) -> list:
-        """List reports."""
-        # TODO: Implement actual API call
-        # data = self._get("reports", {"limit": limit})
-        # return data.get("reports", [])
-
-        # Placeholder data
         return [
-            {"id": "1", "name": "Example Report 1"},
-            {"id": "2", "name": "Example Report 2"},
-        ][:limit]
+            {
+                "api_name": m.get("apiName", ""),
+                "name": m.get("uiName", ""),
+                "description": m.get("description", ""),
+                "category": m.get("category", ""),
+                "type": m.get("type", ""),
+                "expression": m.get("expression", ""),
+                "deprecated": m.get("deprecatedApiNames", []),
+            }
+            for m in metrics[:limit]
+        ]
 
-    def get_report(self, report_id: str) -> Optional[dict]:
-        """Get single report by ID."""
-        # TODO: Implement actual API call
-        # try:
-        #     data = self._get(f"reports/{report_id}")
-        #     return data.get("report")
-        # except httpx.HTTPStatusError as e:
-        #     if e.response.status_code == 404:
-        #         return None
-        #     raise
+    def get_dimension(self, property_id: str, api_name: str) -> Optional[dict]:
+        """Get a specific dimension by API name.
 
-        # Placeholder data
-        if report_id in ("1", "2"):
-            return {"id": report_id, "name": f"Example Report {report_id}"}
-        return None
+        Args:
+            property_id: Property ID
+            api_name: Dimension API name (e.g., "city", "date")
+
+        Returns:
+            Dimension dict or None if not found
+        """
+        dimensions = self.list_dimensions(property_id, limit=500)
+        return next((d for d in dimensions if d["api_name"] == api_name), None)
+
+    def get_metric(self, property_id: str, api_name: str) -> Optional[dict]:
+        """Get a specific metric by API name.
+
+        Args:
+            property_id: Property ID
+            api_name: Metric API name (e.g., "activeUsers", "sessions")
+
+        Returns:
+            Metric dict or None if not found
+        """
+        metrics = self.list_metrics(property_id, limit=500)
+        return next((m for m in metrics if m["api_name"] == api_name), None)
+
+    # --- Report Methods ---
+
+    def run_report(
+        self,
+        property_id: str,
+        dimensions: list[str],
+        metrics: list[str],
+        start_date: str = "30daysAgo",
+        end_date: str = "today",
+        limit: int = 10000,
+        offset: int = 0,
+        order_by: Optional[str] = None,
+        descending: bool = True,
+        dimension_filter: Optional[dict] = None,
+        metric_filter: Optional[dict] = None,
+    ) -> dict:
+        """Run a report with specified dimensions and metrics.
+
+        Args:
+            property_id: Property ID (e.g., "123456789")
+            dimensions: List of dimension API names (e.g., ["date", "city"])
+            metrics: List of metric API names (e.g., ["activeUsers", "sessions"])
+            start_date: Start date (YYYY-MM-DD or relative like "30daysAgo")
+            end_date: End date (YYYY-MM-DD or relative like "today")
+            limit: Max rows to return
+            offset: Row offset for pagination
+            order_by: Dimension or metric to sort by
+            descending: Sort descending (default True)
+            dimension_filter: Optional dimension filter
+            metric_filter: Optional metric filter
+
+        Returns:
+            Report data dict with 'rows', 'dimension_headers', 'metric_headers'
+        """
+        if not property_id.startswith("properties/"):
+            property_id = f"properties/{property_id}"
+
+        request_body = {
+            "dateRanges": [{"startDate": start_date, "endDate": end_date}],
+            "dimensions": [{"name": d} for d in dimensions],
+            "metrics": [{"name": m} for m in metrics],
+            "limit": limit,
+            "offset": offset,
+        }
+
+        # Add ordering if specified
+        if order_by:
+            order_type = "METRIC" if order_by in metrics else "DIMENSION"
+            request_body["orderBys"] = [
+                {
+                    order_type.lower(): {"metricName" if order_type == "METRIC" else "dimensionName": order_by},
+                    "desc": descending,
+                }
+            ]
+
+        # Add filters if specified
+        if dimension_filter:
+            request_body["dimensionFilter"] = dimension_filter
+        if metric_filter:
+            request_body["metricFilter"] = metric_filter
+
+        data = self._post(f"{property_id}:runReport", request_body)
+
+        # Transform response to simpler format
+        dimension_headers = [h.get("name", "") for h in data.get("dimensionHeaders", [])]
+        metric_headers = [h.get("name", "") for h in data.get("metricHeaders", [])]
+
+        rows = []
+        for row in data.get("rows", []):
+            row_data = {}
+
+            # Add dimension values
+            for i, dim_value in enumerate(row.get("dimensionValues", [])):
+                if i < len(dimension_headers):
+                    row_data[dimension_headers[i]] = dim_value.get("value", "")
+
+            # Add metric values
+            for i, metric_value in enumerate(row.get("metricValues", [])):
+                if i < len(metric_headers):
+                    row_data[metric_headers[i]] = metric_value.get("value", "")
+
+            rows.append(row_data)
+
+        return {
+            "rows": rows,
+            "dimension_headers": dimension_headers,
+            "metric_headers": metric_headers,
+            "row_count": data.get("rowCount", len(rows)),
+            "metadata": data.get("metadata", {}),
+        }
+
+    def run_realtime_report(
+        self,
+        property_id: str,
+        dimensions: list[str],
+        metrics: list[str],
+        limit: int = 10000,
+    ) -> dict:
+        """Run a realtime report.
+
+        Args:
+            property_id: Property ID
+            dimensions: List of dimension API names
+            metrics: List of metric API names
+            limit: Max rows
+
+        Returns:
+            Report data dict
+        """
+        if not property_id.startswith("properties/"):
+            property_id = f"properties/{property_id}"
+
+        request_body = {
+            "dimensions": [{"name": d} for d in dimensions],
+            "metrics": [{"name": m} for m in metrics],
+            "limit": limit,
+        }
+
+        data = self._post(f"{property_id}:runRealtimeReport", request_body)
+
+        # Transform response (same format as run_report)
+        dimension_headers = [h.get("name", "") for h in data.get("dimensionHeaders", [])]
+        metric_headers = [h.get("name", "") for h in data.get("metricHeaders", [])]
+
+        rows = []
+        for row in data.get("rows", []):
+            row_data = {}
+            for i, dim_value in enumerate(row.get("dimensionValues", [])):
+                if i < len(dimension_headers):
+                    row_data[dimension_headers[i]] = dim_value.get("value", "")
+            for i, metric_value in enumerate(row.get("metricValues", [])):
+                if i < len(metric_headers):
+                    row_data[metric_headers[i]] = metric_value.get("value", "")
+            rows.append(row_data)
+
+        return {
+            "rows": rows,
+            "dimension_headers": dimension_headers,
+            "metric_headers": metric_headers,
+            "row_count": data.get("rowCount", len(rows)),
+        }
 
 
-
-
-    def list_dimensions(self, limit: int = 20) -> list:
-        """List dimensions."""
-        # TODO: Implement actual API call
-        # data = self._get("dimensions", {"limit": limit})
-        # return data.get("dimensions", [])
-
-        # Placeholder data
-        return [
-            {"id": "1", "name": "Example Dimension 1"},
-            {"id": "2", "name": "Example Dimension 2"},
-        ][:limit]
-
-    def get_dimension(self, dimension_id: str) -> Optional[dict]:
-        """Get single dimension by ID."""
-        # TODO: Implement actual API call
-        # try:
-        #     data = self._get(f"dimensions/{dimension_id}")
-        #     return data.get("dimension")
-        # except httpx.HTTPStatusError as e:
-        #     if e.response.status_code == 404:
-        #         return None
-        #     raise
-
-        # Placeholder data
-        if dimension_id in ("1", "2"):
-            return {"id": dimension_id, "name": f"Example Dimension {dimension_id}"}
-        return None
-
-
-
-
-    def list_metrics(self, limit: int = 20) -> list:
-        """List metrics."""
-        # TODO: Implement actual API call
-        # data = self._get("metrics", {"limit": limit})
-        # return data.get("metrics", [])
-
-        # Placeholder data
-        return [
-            {"id": "1", "name": "Example Metric 1"},
-            {"id": "2", "name": "Example Metric 2"},
-        ][:limit]
-
-    def get_metric(self, metric_id: str) -> Optional[dict]:
-        """Get single metric by ID."""
-        # TODO: Implement actual API call
-        # try:
-        #     data = self._get(f"metrics/{metric_id}")
-        #     return data.get("metric")
-        # except httpx.HTTPStatusError as e:
-        #     if e.response.status_code == 404:
-        #         return None
-        #     raise
-
-        # Placeholder data
-        if metric_id in ("1", "2"):
-            return {"id": metric_id, "name": f"Example Metric {metric_id}"}
-        return None
-
-
+# Backwards compatibility alias
+Client = DataClient

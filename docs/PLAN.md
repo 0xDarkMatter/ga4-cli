@@ -1,25 +1,58 @@
 # ga4 - Development Plan
 
-## Current State
+## Current State (v0.1.0)
 
-- [ ] Basic CLI structure
-- [ ] Auth scaffolding (not implemented)
-- [ ] Placeholder API client
+### Completed
+
+- [x] Basic CLI structure (Typer + Fabric Protocol)
+- [x] OAuth2 authentication flow (login, status, logout)
+- [x] Credential storage (OS keyring + env var override)
+- [x] Token refresh handling
+- [x] Analytics Admin API client (`admin_client.py`)
+- [x] Accounts: list
+- [x] Properties: list, get (with account filtering)
+- [x] Users: list, add, remove, copy, batch-add
+- [x] Account-level access binding support
+- [x] Error handling with semantic exit codes
+- [x] JSON output with `{data, meta}` shape
+- [x] Rich table output for human-readable mode
+- [x] ga4-ops skill for CLI usage patterns
+
+### Recently Completed
+
+- [x] Analytics Data API client (`client.py` rewritten)
+- [x] Dimensions: list, get (property-scoped, real API)
+- [x] Metrics: list, get (property-scoped, real API)
+- [x] Reports: run (custom reports with dimensions/metrics/date range)
+- [x] Reports: realtime (live visitor data)
 
 ## Next Steps
 
-1. [ ] Implement authentication flow
-2. [ ] Connect to real API
-3. [ ] Add error handling for API errors
-4. [ ] Add more resource commands
-5. [ ] Write tests
+1. [ ] Write comprehensive tests
+2. [ ] Add `users list-account` command for account-level bindings
+3. [ ] Register with Fabric (`fabric sync`)
 
 ## API Details
 
-- Base URL: `https://analyticsdata.googleapis.com/v1beta`
-- Auth type: oauth2
-- Resources: properties, reports, dimensions, metrics
+| API | Base URL | Purpose |
+|-----|----------|---------|
+| Analytics Admin | `analyticsadmin.googleapis.com/v1beta` | Accounts, properties, users |
+| Analytics Admin (alpha) | `analyticsadmin.googleapis.com/v1alpha` | Access bindings |
+| Analytics Data | `analyticsdata.googleapis.com/v1beta` | Reports, dimensions, metrics |
+
+## Architecture
+
+```
+src/ga4/
+├── __init__.py        # Version
+├── cli.py             # Typer CLI commands
+├── config.py          # OAuth2 + credential storage
+├── client.py          # Data API (placeholder)
+└── admin_client.py    # Admin API (implemented)
+```
 
 ## Notes
 
-Created from Fabric template.
+- User access can be at Account or Property level
+- Property-level lists may be empty if access is granted at Account level
+- Copy command useful for Looker Studio migrations between orgs
