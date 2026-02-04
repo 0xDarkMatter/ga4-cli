@@ -19,63 +19,93 @@ ga4 auth login
 ga4 auth status
 
 # List resources
-
+ga4 accounts list
 ga4 properties list
-
-ga4 reports list
-
-ga4 dimensions list
-
-ga4 metrics list
-
-```
-
-## Usage
-
-```bash
-# List with JSON output
-ga4 properties list --json
-
-# Get specific item
-ga4 properties get <id> --json
-
-# Filter results
-ga4 properties list --limit 10 --json
+ga4 users list <property-id>
 ```
 
 ## Commands
 
+### Authentication
+
 | Command | Description |
 |---------|-------------|
+| `ga4 auth login` | Authenticate via OAuth2 |
+| `ga4 auth status [--json]` | Check auth status |
+| `ga4 auth logout` | Clear credentials |
 
-| `ga4 properties list` | List properties |
-| `ga4 properties get <id>` | Get specific propertie |
+### Accounts
 
-| `ga4 reports list` | List reports |
-| `ga4 reports get <id>` | Get specific report |
+| Command | Description |
+|---------|-------------|
+| `ga4 accounts list [--json]` | List GA4 accounts |
 
-| `ga4 dimensions list` | List dimensions |
-| `ga4 dimensions get <id>` | Get specific dimension |
+### Properties
 
-| `ga4 metrics list` | List metrics |
-| `ga4 metrics get <id>` | Get specific metric |
+| Command | Description |
+|---------|-------------|
+| `ga4 properties list [--json]` | List properties |
+| `ga4 properties get <id> [--json]` | Get specific property |
 
+### Users (Access Management)
 
-## Authentication
+| Command | Description |
+|---------|-------------|
+| `ga4 users list <property-id> [--json]` | List users with access |
+| `ga4 users add <property-id> <email> --role <role>` | Add user access |
+| `ga4 users remove <property-id> <email>` | Remove user access |
+| `ga4 users copy <src> <dest> [--dry-run]` | Copy users between properties |
+| `ga4 users batch-add <property-id> <file>` | Add users from JSON/CSV |
+
+**Roles:** `viewer`, `analyst`, `editor`, `admin`
+
+### Reports, Dimensions, Metrics
+
+| Command | Description |
+|---------|-------------|
+| `ga4 reports list [--json]` | List reports |
+| `ga4 reports get <id> [--json]` | Get specific report |
+| `ga4 dimensions list [--json]` | List dimensions |
+| `ga4 dimensions get <id> [--json]` | Get specific dimension |
+| `ga4 metrics list [--json]` | List metrics |
+| `ga4 metrics get <id> [--json]` | Get specific metric |
+
+## Usage Examples
 
 ```bash
-ga4 auth login   # Authenticate
-ga4 auth status  # Check status
-ga4 auth logout  # Clear credentials
-```
-
-## JSON Output
-
-All commands support `--json` for machine-readable output:
-
-```bash
+# List properties and filter with jq
 ga4 properties list --json | jq '.data[0]'
+
+# Add user to property
+ga4 users add 123456789 user@example.com --role analyst
+
+# List users on property
+ga4 users list 123456789
+
+# Remove user from property
+ga4 users remove 123456789 user@example.com
+
+# Copy users between properties (for Looker Studio migrations)
+ga4 users copy 123456789 987654321 --dry-run  # Preview
+ga4 users copy 123456789 987654321            # Execute
+ga4 users copy 123456789 987654321 --role analyst  # Only analysts
+ga4 users copy 123456789 987654321 --exclude admin@example.com
+
+# Batch add users from file
+ga4 users batch-add 123456789 users.json --dry-run
+ga4 users batch-add 123456789 users.csv
 ```
+
+## Exit Codes
+
+| Code | Meaning |
+|------|---------|
+| 0 | Success |
+| 1 | General error |
+| 2 | Auth required |
+| 3 | Not found |
+| 4 | Validation error |
+| 5 | Forbidden |
 
 ## Protocol
 

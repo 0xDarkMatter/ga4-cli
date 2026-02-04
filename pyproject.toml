@@ -13,6 +13,9 @@ dependencies = [
     "httpx>=0.25.0",
     "keyring>=24.0.0",
     "python-dotenv>=1.0.0",
+    "google-auth>=2.0.0",
+    "google-auth-oauthlib>=1.0.0",
+    "google-auth-httplib2>=0.1.0",
 ]
 
 [project.optional-dependencies]
@@ -33,7 +36,7 @@ packages = ["src/ga4"]
 
 [tool.fabric]
 description = "Google Analytics 4 reporting and data analysis"
-resources = ["properties", "reports", "dimensions", "metrics"]
+resources = ["properties", "reports", "dimensions", "metrics", "users"]
 auth = "oauth2"
 status = "experimental"
 
