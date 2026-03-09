@@ -84,6 +84,64 @@ ga4 users list <property-id>
 | `ga4 metrics list <property-id> [--json]` | List available metrics |
 | `ga4 metrics get <property-id> <api-name> [--json]` | Get metric details |
 
+### Health (Property Diagnostics)
+
+| Command | Description |
+|---------|-------------|
+| `ga4 health check <property-id> [--json]` | Full health check (tracking, access, config) |
+| `ga4 health access <property-id> [--json]` | Access audit only |
+| `ga4 health tracking <property-id> [--json]` | Tracking & data quality only |
+| `ga4 health summary <property-id> [--json]` | Quick one-line status |
+
+### Scan (Multi-Property)
+
+| Command | Description |
+|---------|-------------|
+| `ga4 scan all [--account ID] [--json]` | Health check all properties |
+| `ga4 scan access [--account ID] [--json]` | Access audit across properties |
+| `ga4 scan issues [--account ID] [--json]` | Only show problems |
+
+### Introspection
+
+| Command | Description |
+|---------|-------------|
+| `ga4 describe [--json]` | List all resources and actions |
+
+## Health Checks
+
+```bash
+# Full health check on a property
+ga4 health check 123456789
+
+# Quick one-line summary
+ga4 health summary 123456789
+
+# Access audit only
+ga4 health access 123456789
+
+# Tracking & data quality
+ga4 health tracking 123456789
+
+# Scan all properties for issues
+ga4 scan issues
+
+# Scan all properties (full report)
+ga4 scan all --json | jq '.data.overall'
+
+# Scan specific account
+ga4 scan all --account 123456789
+```
+
+**Health checks include:**
+- Data recency (is data flowing?)
+- Session volume and bounce rate
+- (not set) prevalence in source dimension
+- User count and admin count
+- External domain detection
+- Role distribution analysis
+- Property configuration (timezone, currency, industry)
+- Custom dimensions/metrics
+
 ## Usage Examples
 
 ```bash

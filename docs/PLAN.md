@@ -25,12 +25,20 @@
 - [x] Metrics: list, get (property-scoped, real API)
 - [x] Reports: run (custom reports with dimensions/metrics/date range)
 - [x] Reports: realtime (live visitor data)
+- [x] Health check engine (`checks.py`) with 11 checks across tracking/access/config
+- [x] `ga4 health` commands: check, access, tracking, summary
+- [x] `ga4 scan` commands: all, access, issues (multi-property)
+- [x] `ga4 describe` introspection command (Fabric Protocol)
+- [x] `--dry-run` on `users add` and `users remove`
+- [x] Rate limit handling (exit code 6) in both API clients
 
 ## Next Steps
 
 1. [ ] Write comprehensive tests
 2. [ ] Add `users list-account` command for account-level bindings
 3. [ ] Register with Fabric (`fabric sync`)
+4. [ ] Add `--quiet` and `--verbose` flags (Fabric Protocol)
+5. [ ] Add `--fields` flag for field filtering (Fabric Protocol)
 
 ## API Details
 

@@ -36,7 +36,7 @@ packages = ["src/ga4"]
 
 [tool.fabric]
 description = "Google Analytics 4 reporting and data analysis"
-resources = ["properties", "reports", "dimensions", "metrics", "users"]
+resources = ["properties", "reports", "dimensions", "metrics", "users", "health", "scan"]
 auth = "oauth2"
 status = "experimental"
 

@@ -7,7 +7,8 @@ from typing import Optional
 
 import httpx
 
-from .config import get_tokens, get_google_credentials, refresh_credentials, is_token_expired
+from .config import DEFAULT_PROFILE, get_tokens, get_google_credentials, refresh_credentials, is_token_expired
+from .errors import RateLimitError
 
 
 # Role mapping: CLI name -> API name
@@ -29,15 +30,16 @@ class AdminClient:
     BASE_URL_ALPHA = "https://analyticsadmin.googleapis.com/v1alpha"
     TIMEOUT = 30
 
-    def __init__(self):
+    def __init__(self, profile: str = DEFAULT_PROFILE):
+        self._profile = profile
         self._ensure_valid_token()
-        tokens = get_tokens()
+        tokens = get_tokens(profile)
         self.token = tokens.get("access_token") if tokens else None
 
     def _ensure_valid_token(self) -> None:
         """Refresh token if expired."""
-        if is_token_expired():
-            refresh_credentials()
+        if is_token_expired(profile=self._profile):
+            refresh_credentials(profile=self._profile)
 
     def _headers(self) -> dict:
         """Get request headers."""
@@ -47,6 +49,11 @@ class AdminClient:
             "Content-Type": "application/json",
         }
 
+    def _check_rate_limit(self, response: httpx.Response) -> None:
+        """Raise RateLimitError if response is 429."""
+        if response.status_code == 429:
+            raise RateLimitError()
+
     def _get(self, endpoint: str, params: dict = None) -> Optional[dict]:
         """Make GET request."""
         response = httpx.get(
@@ -55,6 +62,7 @@ class AdminClient:
             params=params,
             timeout=self.TIMEOUT,
         )
+        self._check_rate_limit(response)
         response.raise_for_status()
         return response.json()
 
@@ -66,6 +74,7 @@ class AdminClient:
             json=data,
             timeout=self.TIMEOUT,
         )
+        self._check_rate_limit(response)
         response.raise_for_status()
         return response.json()
 
@@ -76,6 +85,7 @@ class AdminClient:
             headers=self._headers(),
             timeout=self.TIMEOUT,
         )
+        self._check_rate_limit(response)
         response.raise_for_status()
         return True
 
@@ -87,6 +97,7 @@ class AdminClient:
             params=params,
             timeout=self.TIMEOUT,
         )
+        self._check_rate_limit(response)
         response.raise_for_status()
         return response.json()
 
@@ -98,6 +109,7 @@ class AdminClient:
             json=data,
             timeout=self.TIMEOUT,
         )
+        self._check_rate_limit(response)
         response.raise_for_status()
         return response.json()
 
@@ -108,6 +120,7 @@ class AdminClient:
             headers=self._headers(),
             timeout=self.TIMEOUT,
         )
+        self._check_rate_limit(response)
         response.raise_for_status()
         return True
 
@@ -219,6 +232,241 @@ class AdminClient:
             if e.response.status_code == 404:
                 return None
             raise
+
+    # --- Property Configuration Methods ---
+
+    def list_data_streams(self, property_id: str, limit: int = 200) -> list:
+        """List data streams for a property."""
+        if not property_id.startswith("properties/"):
+            property_id = f"properties/{property_id}"
+
+        all_streams = []
+        page_token = None
+
+        while True:
+            params = {"pageSize": min(limit, 200)}
+            if page_token:
+                params["pageToken"] = page_token
+
+            data = self._get(f"{property_id}/dataStreams", params)
+            all_streams.extend(data.get("dataStreams", []))
+
+            page_token = data.get("nextPageToken")
+            if not page_token or len(all_streams) >= limit:
+                break
+
+        results = []
+        for s in all_streams[:limit]:
+            stream = {
+                "name": s.get("name", ""),
+                "type": s.get("type", ""),
+                "display_name": s.get("displayName", ""),
+                "create_time": s.get("createTime"),
+                "update_time": s.get("updateTime"),
+            }
+            if s.get("webStreamData"):
+                stream["measurement_id"] = s["webStreamData"].get("measurementId", "")
+                stream["default_uri"] = s["webStreamData"].get("defaultUri", "")
+            if s.get("androidAppStreamData"):
+                stream["package_name"] = s["androidAppStreamData"].get("packageName", "")
+            if s.get("iosAppStreamData"):
+                stream["bundle_id"] = s["iosAppStreamData"].get("bundleId", "")
+            results.append(stream)
+
+        return results
+
+    def list_key_events(self, property_id: str, limit: int = 200) -> list:
+        """List key events (conversions) for a property."""
+        if not property_id.startswith("properties/"):
+            property_id = f"properties/{property_id}"
+
+        all_events = []
+        page_token = None
+
+        while True:
+            params = {"pageSize": min(limit, 200)}
+            if page_token:
+                params["pageToken"] = page_token
+
+            data = self._get(f"{property_id}/keyEvents", params)
+            all_events.extend(data.get("keyEvents", []))
+
+            page_token = data.get("nextPageToken")
+            if not page_token or len(all_events) >= limit:
+                break
+
+        return [
+            {
+                "name": e.get("name", ""),
+                "event_name": e.get("eventName", ""),
+                "create_time": e.get("createTime"),
+                "custom": e.get("custom", False),
+                "deletable": e.get("deletable", False),
+                "counting_method": e.get("countingMethod", ""),
+            }
+            for e in all_events[:limit]
+        ]
+
+    def list_custom_dimensions(self, property_id: str, limit: int = 200) -> list:
+        """List custom dimensions for a property."""
+        if not property_id.startswith("properties/"):
+            property_id = f"properties/{property_id}"
+
+        all_dims = []
+        page_token = None
+
+        while True:
+            params = {"pageSize": min(limit, 200)}
+            if page_token:
+                params["pageToken"] = page_token
+
+            data = self._get(f"{property_id}/customDimensions", params)
+            all_dims.extend(data.get("customDimensions", []))
+
+            page_token = data.get("nextPageToken")
+            if not page_token or len(all_dims) >= limit:
+                break
+
+        return [
+            {
+                "name": d.get("name", ""),
+                "parameter_name": d.get("parameterName", ""),
+                "display_name": d.get("displayName", ""),
+                "description": d.get("description", ""),
+                "scope": d.get("scope", ""),
+            }
+            for d in all_dims[:limit]
+        ]
+
+    def list_custom_metrics(self, property_id: str, limit: int = 200) -> list:
+        """List custom metrics for a property."""
+        if not property_id.startswith("properties/"):
+            property_id = f"properties/{property_id}"
+
+        all_metrics = []
+        page_token = None
+
+        while True:
+            params = {"pageSize": min(limit, 200)}
+            if page_token:
+                params["pageToken"] = page_token
+
+            data = self._get(f"{property_id}/customMetrics", params)
+            all_metrics.extend(data.get("customMetrics", []))
+
+            page_token = data.get("nextPageToken")
+            if not page_token or len(all_metrics) >= limit:
+                break
+
+        return [
+            {
+                "name": m.get("name", ""),
+                "parameter_name": m.get("parameterName", ""),
+                "display_name": m.get("displayName", ""),
+                "description": m.get("description", ""),
+                "scope": m.get("scope", ""),
+                "measurement_unit": m.get("measurementUnit", ""),
+            }
+            for m in all_metrics[:limit]
+        ]
+
+    def list_google_ads_links(self, property_id: str) -> list:
+        """List Google Ads links for a property."""
+        if not property_id.startswith("properties/"):
+            property_id = f"properties/{property_id}"
+
+        all_links = []
+        page_token = None
+
+        while True:
+            params = {"pageSize": 200}
+            if page_token:
+                params["pageToken"] = page_token
+
+            data = self._get(f"{property_id}/googleAdsLinks", params)
+            all_links.extend(data.get("googleAdsLinks", []))
+
+            page_token = data.get("nextPageToken")
+            if not page_token:
+                break
+
+        return [
+            {
+                "name": link.get("name", ""),
+                "customer_id": link.get("customerId", ""),
+                "can_manage_clients": link.get("canManageClients", False),
+                "ads_personalization_enabled": link.get("adsPersonalizationEnabled", False),
+                "create_time": link.get("createTime"),
+            }
+            for link in all_links
+        ]
+
+    def list_audiences(self, property_id: str, limit: int = 200) -> list:
+        """List audiences for a property (v1alpha)."""
+        if not property_id.startswith("properties/"):
+            property_id = f"properties/{property_id}"
+
+        all_audiences = []
+        page_token = None
+
+        while True:
+            params = {"pageSize": min(limit, 200)}
+            if page_token:
+                params["pageToken"] = page_token
+
+            data = self._get_alpha(f"{property_id}/audiences", params)
+            all_audiences.extend(data.get("audiences", []))
+
+            page_token = data.get("nextPageToken")
+            if not page_token or len(all_audiences) >= limit:
+                break
+
+        return [
+            {
+                "name": a.get("name", ""),
+                "display_name": a.get("displayName", ""),
+                "description": a.get("description", ""),
+                "membership_duration_days": a.get("membershipDurationDays"),
+                "ads_personalization_enabled": a.get("adsPersonalizationEnabled", False),
+            }
+            for a in all_audiences[:limit]
+        ]
+
+    def get_enhanced_measurement(self, property_id: str, stream_id: str) -> dict:
+        """Get enhanced measurement settings for a data stream (v1alpha)."""
+        if not property_id.startswith("properties/"):
+            property_id = f"properties/{property_id}"
+
+        stream_name = f"{property_id}/dataStreams/{stream_id}"
+        try:
+            data = self._get_alpha(f"{stream_name}/enhancedMeasurementSettings")
+            return {
+                "stream_enabled": data.get("streamEnabled", False),
+                "scrolls_enabled": data.get("scrollsEnabled", False),
+                "outbound_clicks_enabled": data.get("outboundClicksEnabled", False),
+                "site_search_enabled": data.get("siteSearchEnabled", False),
+                "video_engagement_enabled": data.get("videoEngagementEnabled", False),
+                "file_downloads_enabled": data.get("fileDownloadsEnabled", False),
+                "page_changes_enabled": data.get("pageChangesEnabled", False),
+                "form_interactions_enabled": data.get("formInteractionsEnabled", False),
+                "search_query_parameter": data.get("searchQueryParameter", ""),
+            }
+        except Exception:
+            return {}
+
+    def get_data_retention_settings(self, property_id: str) -> dict:
+        """Get data retention settings for a property (v1beta)."""
+        if not property_id.startswith("properties/"):
+            property_id = f"properties/{property_id}"
+        try:
+            data = self._get(f"{property_id}/dataRetentionSettings")
+            return {
+                "event_data_retention": data.get("eventDataRetention", ""),
+                "user_data_retention": data.get("userDataRetention", ""),
+                "reset_on_new_activity": data.get("resetUserDataOnNewActivity", False),
+            }
+        except Exception:
+            return {}
 
     # --- Access Binding (User Management) Methods ---
 

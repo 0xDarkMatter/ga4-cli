@@ -52,6 +52,9 @@ htmlcov/
 # GA4 credentials and tokens (OAuth2)
 .ga4/
 
+# API response cache
+.cache/
+
 # OS
 .DS_Store
 Thumbs.db

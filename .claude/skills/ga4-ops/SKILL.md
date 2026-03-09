@@ -196,6 +196,65 @@ Environment variables:
 - `GA4_REFRESH_TOKEN` - OAuth refresh token
 - `GA4_CREDENTIALS_PATH` - Path to OAuth client JSON
 
+## Health Checks & Scanning
+
+### Single Property Health
+
+```bash
+# Full diagnostic (async prefetch — all API calls concurrent)
+ga4 health check 123456789
+ga4 health check 123456789 --json | jq '.data.score'
+
+# Category-specific (only fetches needed data)
+ga4 health access 123456789        # User access audit
+ga4 health tracking 123456789      # Data quality checks
+ga4 health summary 123456789       # One-line score
+```
+
+### Multi-Property Scanning
+
+```bash
+# Scan all properties (3 concurrent workers by default)
+ga4 scan all
+ga4 scan all --workers 5           # 5 concurrent properties
+ga4 scan all --account 123456789   # Filter to one account
+
+# Access audit across all properties
+ga4 scan access --json | jq '.data.properties[] | {property_name, score}'
+
+# Only show problems
+ga4 scan issues
+ga4 scan issues --json | jq '.data.properties[].checks[] | select(.status == "fail")'
+```
+
+### Health Check Categories
+
+| Category | Checks | What It Finds |
+|----------|--------|---------------|
+| tracking | data_recency, realtime, sessions, bounce, not_set | Broken tracking, data gaps |
+| access | user_count, admin_count, external_domains, roles | Access sprawl, security |
+| config | property_config, custom_dimensions | Missing settings |
+
+### jq Patterns for Health Data
+
+```bash
+# Properties scoring below 70
+ga4 scan all --json | jq '.data.properties[] | select(.score < 70) | {property_name, score, grade}'
+
+# All failing checks
+ga4 health check 123456789 --json | jq '.data.checks[] | select(.status == "fail")'
+
+# Average score across all properties
+ga4 scan all --json | jq '.data.overall.avg_score'
+```
+
+### Introspection
+
+```bash
+ga4 describe --json          # List all resources and actions
+ga4 describe --json | jq '.data.resources | keys'
+```
+
 ## See Also
 
 - [references/api-endpoints.md](references/api-endpoints.md) - Full API endpoint reference

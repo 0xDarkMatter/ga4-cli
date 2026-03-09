@@ -7,7 +7,8 @@ from typing import Optional
 
 import httpx
 
-from .config import get_tokens, is_token_expired, refresh_credentials
+from .config import DEFAULT_PROFILE, get_tokens, is_token_expired, refresh_credentials
+from .errors import RateLimitError
 
 
 class DataClient:
@@ -16,15 +17,16 @@ class DataClient:
     BASE_URL = "https://analyticsdata.googleapis.com/v1beta"
     TIMEOUT = 30
 
-    def __init__(self):
+    def __init__(self, profile: str = DEFAULT_PROFILE):
+        self._profile = profile
         self._ensure_valid_token()
-        tokens = get_tokens()
+        tokens = get_tokens(profile)
         self.token = tokens.get("access_token") if tokens else None
 
     def _ensure_valid_token(self) -> None:
         """Refresh token if expired."""
-        if is_token_expired():
-            refresh_credentials()
+        if is_token_expired(profile=self._profile):
+            refresh_credentials(profile=self._profile)
 
     def _headers(self) -> dict:
         """Get request headers."""
@@ -34,6 +36,11 @@ class DataClient:
             "Content-Type": "application/json",
         }
 
+    def _check_rate_limit(self, response: httpx.Response) -> None:
+        """Raise RateLimitError if response is 429."""
+        if response.status_code == 429:
+            raise RateLimitError()
+
     def _get(self, endpoint: str, params: dict = None) -> Optional[dict]:
         """Make GET request."""
         response = httpx.get(
@@ -42,6 +49,7 @@ class DataClient:
             params=params,
             timeout=self.TIMEOUT,
         )
+        self._check_rate_limit(response)
         response.raise_for_status()
         return response.json()
 
@@ -53,6 +61,7 @@ class DataClient:
             json=data,
             timeout=self.TIMEOUT,
         )
+        self._check_rate_limit(response)
         response.raise_for_status()
         return response.json()
 

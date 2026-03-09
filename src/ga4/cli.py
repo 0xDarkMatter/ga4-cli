@@ -4,17 +4,42 @@ from __future__ import annotations
 
 import csv
 import json
+import os
 from pathlib import Path
 from typing import Annotated, Optional
 
 import typer
-from rich.console import Console
 from rich.table import Table
 
 from . import __version__
+from .cache import Cache
 from .client import DataClient
-
-from .config import get_tokens, clear_credentials, get_auth_status, run_oauth_flow
+from .config import (
+    DEFAULT_PROFILE,
+    clear_credentials,
+    get_auth_status,
+    list_profiles,
+    run_oauth_flow,
+)
+from .health_cli import health_app
+from .scan_cli import scan_app
+from .shared import (
+    EXIT_AUTH_REQUIRED,
+    EXIT_CONFLICT,
+    EXIT_ERROR,
+    EXIT_FORBIDDEN,
+    EXIT_NOT_FOUND,
+    EXIT_RATE_LIMITED,
+    EXIT_SUCCESS,
+    EXIT_VALIDATION,
+    console,
+    error as _error,
+    get_active_profile,
+    handle_api_error,
+    output_json as _output_json,
+    require_auth as _require_auth,
+    set_active_profile,
+)
 
 
 app = typer.Typer(
@@ -22,57 +47,6 @@ app = typer.Typer(
     help="Google Analytics 4 reporting and data analysis",
     no_args_is_help=True,
 )
-
-# stderr for human output
-console = Console(stderr=True)
-
-# Exit codes (Fabric Protocol)
-EXIT_SUCCESS = 0
-EXIT_ERROR = 1
-EXIT_AUTH_REQUIRED = 2
-EXIT_NOT_FOUND = 3
-EXIT_VALIDATION = 4
-EXIT_FORBIDDEN = 5
-EXIT_RATE_LIMITED = 6
-EXIT_CONFLICT = 7
-
-
-def _output_json(data) -> None:
-    """Output JSON to stdout."""
-    print(json.dumps(data, indent=2, default=str))
-
-
-def _error(
-    message: str,
-    code: str = "ERROR",
-    exit_code: int = EXIT_ERROR,
-    details: dict = None,
-    as_json: bool = False,
-):
-    """Output error and exit."""
-    error_obj = {"error": {"code": code, "message": message}}
-    if details:
-        error_obj["error"]["details"] = details
-
-    if as_json:
-        _output_json(error_obj)
-
-    console.print(f"[red]Error:[/red] {message}")
-    raise typer.Exit(exit_code)
-
-
-def _require_auth(as_json: bool = False):
-    """Check authentication, exit if not authenticated."""
-
-    tokens = get_tokens()
-    if not tokens or not tokens.get("access_token"):
-
-        _error(
-            "Not authenticated. Run: ga4 auth login",
-            "AUTH_REQUIRED",
-            EXIT_AUTH_REQUIRED,
-            as_json=as_json,
-        )
 
 
 def version_callback(value: bool):
@@ -87,9 +61,132 @@ def main(
         Optional[bool],
         typer.Option("--version", "-V", callback=version_callback, is_eager=True),
     ] = None,
-):
+    profile: Annotated[
+        str,
+        typer.Option(
+            "--profile",
+            "-P",
+            help="Auth profile to use (env: GA4_PROFILE)",
+            show_default=True,
+        ),
+    ] = os.environ.get("GA4_PROFILE", DEFAULT_PROFILE),
+) -> None:
     """Google Analytics 4 reporting and data analysis"""
-    pass
+    set_active_profile(profile)
+
+
+# Register health and scan sub-apps
+app.add_typer(health_app, name="health")
+app.add_typer(scan_app, name="scan")
+
+
+# =============================================================================
+# DESCRIBE COMMAND (Fabric Protocol introspection)
+# =============================================================================
+
+
+@app.command("describe")
+def describe(
+    json_output: Annotated[bool, typer.Option("--json", help="Output as JSON")] = False,
+):
+    """
+    List all available resources and actions (no auth required).
+
+    Examples:
+        ga4 describe
+        ga4 describe --json
+    """
+    resources = {
+        "auth": ["login", "status", "logout", "list"],
+        "accounts": ["list"],
+        "properties": ["list", "get"],
+        "reports": ["run", "realtime"],
+        "dimensions": ["list", "get"],
+        "metrics": ["list", "get"],
+        "users": ["list", "add", "remove", "copy", "batch-add"],
+        "health": ["check", "access", "tracking", "summary"],
+        "scan": ["all", "access", "issues"],
+    }
+
+    if json_output:
+        _output_json({
+            "data": {
+                "tool": "ga4",
+                "version": __version__,
+                "protocol": "fabric",
+                "resources": resources,
+            },
+        })
+        return
+
+    console.print(f"[bold]ga4[/bold] v{__version__}")
+    console.print()
+    for resource, actions in resources.items():
+        console.print(f"  [cyan]{resource}[/cyan]: {', '.join(actions)}")
+
+
+# =============================================================================
+# CACHE COMMAND
+# =============================================================================
+
+
+@app.command("cache")
+def cache_cmd(
+    action: Annotated[str, typer.Argument(help="Action: clear, status")] = "status",
+    property_id: Annotated[Optional[str], typer.Argument(help="Property ID to clear (for 'clear' action)")] = None,
+    json_output: Annotated[bool, typer.Option("--json", help="Output as JSON")] = False,
+):
+    """
+    Manage API response cache.
+
+    The cache stores admin and metadata API responses in .cache/ga4/ to speed
+    up repeated health checks.  Reporting data is never cached.
+
+    Examples:
+        ga4 cache status
+        ga4 cache clear
+        ga4 cache clear 123456789   # clear one property
+        ga4 cache status --json
+    """
+    cache = Cache()
+
+    if action == "status":
+        stats = cache.status()
+        if json_output:
+            _output_json({"data": stats})
+            return
+        if stats["entries"] == 0:
+            console.print("[dim]Cache is empty[/dim]")
+            return
+        console.print(f"Cache directory: [cyan]{stats['cache_dir']}[/cyan]")
+        console.print(f"Total entries: [bold]{stats['entries']}[/bold]")
+        console.print(f"Total size: [dim]{stats['size_bytes']:,} bytes[/dim]")
+        if stats["namespaces"]:
+            console.print()
+            from rich.table import Table
+            table = Table(title="Cache Namespaces")
+            table.add_column("Namespace")
+            table.add_column("Entries", justify="right")
+            for ns in stats["namespaces"]:
+                table.add_row(ns["name"], str(ns["count"]))
+            console.print(table)
+
+    elif action == "clear":
+        if property_id:
+            count = cache.clear_property(property_id)
+            if json_output:
+                _output_json({"data": {"cleared": count, "property_id": property_id}})
+            else:
+                console.print(f"[green]Cleared {count} cache entries for property {property_id}[/green]")
+        else:
+            count = cache.clear()
+            if json_output:
+                _output_json({"data": {"cleared": count}})
+            else:
+                console.print(f"[green]Cleared {count} cache entries[/green]")
+
+    else:
+        _error(f"Unknown action: {action!r}. Use 'clear' or 'status'.", "VALIDATION_ERROR", EXIT_VALIDATION, as_json=json_output)
 
 
 # =============================================================================
@@ -102,6 +199,7 @@ app.add_typer(auth_app, name="auth")
 @auth_app.command("login")
 def auth_login(
     port: Annotated[int, typer.Option("--port", "-p", help="Local server port")] = 8080,
+    profile: Annotated[Optional[str], typer.Option("--profile", "-P", help="Profile to authenticate")] = None,
 ):
     """
     Authenticate with Google Analytics.
@@ -111,11 +209,20 @@ def auth_login(
     Examples:
         ga4 auth login
         ga4 auth login --port 9000
+        ga4 auth login --profile work
+        ga4 -P work auth login
     """
+    active = profile if profile is not None else get_active_profile()
     try:
-        console.print("Opening browser for authentication...")
-        creds = run_oauth_flow(port=port)
-        console.print("[green]Authenticated successfully![/green]")
+        if active != DEFAULT_PROFILE:
+            console.print(f"Opening browser for authentication (profile: [cyan]{active}[/cyan])...")
+        else:
+            console.print("Opening browser for authentication...")
+        run_oauth_flow(port=port, profile=active)
+        if active != DEFAULT_PROFILE:
+            console.print(f"[green]Authenticated successfully (profile: {active})![/green]")
+        else:
+            console.print("[green]Authenticated successfully![/green]")
     except FileNotFoundError as e:
         _error(str(e), "CONFIG_ERROR", EXIT_ERROR)
     except Exception as e:
@@ -126,6 +233,7 @@ def auth_login(
 @auth_app.command("status")
 def auth_status_cmd(
     json_output: Annotated[bool, typer.Option("--json", help="Output as JSON")] = False,
+    profile: Annotated[Optional[str], typer.Option("--profile", "-P", help="Profile to check")] = None,
 ):
     """
     Check authentication status.
@@ -133,39 +241,115 @@ def auth_status_cmd(
     Examples:
         ga4 auth status
         ga4 auth status --json
+        ga4 auth status --profile work
+        ga4 -P work auth status
     """
-    status = get_auth_status()
+    active = profile if profile is not None else get_active_profile()
+    status = get_auth_status(profile=active)
 
     if json_output:
         _output_json({"data": status})
         return
+
+    console.print(f"Profile: [cyan]{active}[/cyan]")
 
     if status.get("authenticated"):
         console.print("Authenticated: [green]yes[/green]")
         console.print(f"Source: [cyan]{status.get('source', 'unknown')}[/cyan]")
 
         if status.get("expired"):
-            console.print("[yellow]Token expired - run auth login to refresh[/yellow]")
+            if active != DEFAULT_PROFILE:
+                console.print(f"[yellow]Token expired - run: ga4 auth login --profile {active}[/yellow]")
+            else:
+                console.print("[yellow]Token expired - run auth login to refresh[/yellow]")
         elif status.get("expires_at"):
             console.print(f"Expires: {status['expires_at']}")
 
     else:
         console.print("Authenticated: [red]no[/red]")
-        console.print("Run: ga4 auth login")
+        if active != DEFAULT_PROFILE:
+            console.print(f"Run: ga4 auth login --profile {active}")
+        else:
+            console.print("Run: ga4 auth login")
 
 
 @auth_app.command("logout")
-def auth_logout():
+def auth_logout(
+    profile: Annotated[Optional[str], typer.Option("--profile", "-P", help="Profile to clear ('*' for all)")] = None,
+):
     """
     Clear stored credentials.
 
     Examples:
         ga4 auth logout
+        ga4 auth logout --profile work
+        ga4 auth logout --profile '*'
+        ga4 -P work auth logout
     """
+    active = profile if profile is not None else get_active_profile()
+    clear_credentials(profile=active)
 
-    clear_credentials()
+    if active == "*":
+        console.print("[green]Logged out all profiles[/green]")
+    elif active != DEFAULT_PROFILE:
+        console.print(f"[green]Logged out (profile: {active})[/green]")
+    else:
+        console.print("[green]Logged out[/green]")
 
-    console.print("[green]Logged out[/green]")
+
+@auth_app.command("list")
+def auth_list(
+    json_output: Annotated[bool, typer.Option("--json", help="Output as JSON")] = False,
+):
+    """
+    List all authentication profiles and their status.
+
+    Examples:
+        ga4 auth list
+        ga4 auth list --json
+    """
+    profiles = list_profiles()
+    active = get_active_profile()
+
+    # Mark the currently active profile
+    for p in profiles:
+        p["active"] = p["profile"] == active
+
+    if json_output:
+        _output_json({"data": profiles})
+        return
+
+    if not profiles:
+        console.print("[yellow]No profiles found[/yellow]")
+        return
+
+    table = Table(title="Auth Profiles")
+    table.add_column("Profile")
+    table.add_column("Authenticated")
+    table.add_column("Source")
+    table.add_column("Expired")
+    table.add_column("Active")
+
+    for p in profiles:
+        auth_display = "[green]yes[/green]" if p["authenticated"] else "[red]no[/red]"
+        expired = p.get("expired")
+        if expired is True:
+            expired_display = "[yellow]yes[/yellow]"
+        elif expired is False:
+            expired_display = "no"
+        else:
+            expired_display = "-"
+        active_display = "[cyan]*[/cyan]" if p["active"] else ""
+
+        table.add_row(
+            p["profile"],
+            auth_display,
+            p.get("source", "none"),
+            expired_display,
+            active_display,
+        )
+
+    console.print(table)
 
 
 # =============================================================================
@@ -191,7 +375,7 @@ def accounts_list(
 
     from .admin_client import AdminClient
 
-    client = AdminClient()
+    client = AdminClient(profile=get_active_profile())
     try:
         items = client.list_accounts(limit=limit)
     except Exception as e:
@@ -245,7 +429,7 @@ def properties_list(
 
     from .admin_client import AdminClient
 
-    client = AdminClient()
+    client = AdminClient(profile=get_active_profile())
     try:
         items = client.list_properties(account_id=account, limit=limit)
     except Exception as e:
@@ -293,7 +477,7 @@ def properties_get(
 
     from .admin_client import AdminClient
 
-    client = AdminClient()
+    client = AdminClient(profile=get_active_profile())
     try:
         item = client.get_property(property_id)
     except Exception as e:
@@ -359,7 +543,7 @@ def reports_run(
     if not metric_list:
         _error("At least one metric is required", "VALIDATION_ERROR", EXIT_VALIDATION, as_json=json_output)
 
-    client = DataClient()
+    client = DataClient(profile=get_active_profile())
     try:
         report = client.run_report(
             property_id=property_id,
@@ -422,7 +606,7 @@ def reports_realtime(
     dim_list = [d.strip() for d in dimensions.split(",") if d.strip()]
     metric_list = [m.strip() for m in metrics.split(",") if m.strip()]
 
-    client = DataClient()
+    client = DataClient(profile=get_active_profile())
     try:
         report = client.run_realtime_report(
             property_id=property_id,
@@ -480,7 +664,7 @@ def dimensions_list(
     """
     _require_auth(json_output)
 
-    client = DataClient()
+    client = DataClient(profile=get_active_profile())
     try:
         items = client.list_dimensions(property_id, limit=limit)
     except Exception as e:
@@ -531,7 +715,7 @@ def dimensions_get(
     """
     _require_auth(json_output)
 
-    client = DataClient()
+    client = DataClient(profile=get_active_profile())
     try:
         item = client.get_dimension(property_id, api_name)
     except Exception as e:
@@ -582,7 +766,7 @@ def metrics_list(
     """
     _require_auth(json_output)
 
-    client = DataClient()
+    client = DataClient(profile=get_active_profile())
     try:
         items = client.list_metrics(property_id, limit=limit)
     except Exception as e:
@@ -635,7 +819,7 @@ def metrics_get(
     """
     _require_auth(json_output)
 
-    client = DataClient()
+    client = DataClient(profile=get_active_profile())
     try:
         item = client.get_metric(property_id, api_name)
     except Exception as e:
@@ -685,7 +869,7 @@ def users_list(
 
     from .admin_client import AdminClient
 
-    client = AdminClient()
+    client = AdminClient(profile=get_active_profile())
     try:
         users = client.list_access_bindings(property_id)
     except Exception as e:
@@ -717,6 +901,7 @@ def users_add(
     property_id: Annotated[str, typer.Argument(help="Property ID")],
     email: Annotated[str, typer.Argument(help="User email address")],
     role: Annotated[str, typer.Option("--role", "-r", help="Role: viewer, analyst, editor, admin")] = "analyst",
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="Preview without making changes")] = False,
     json_output: Annotated[bool, typer.Option("--json", help="Output as JSON")] = False,
 ):
     """
@@ -725,6 +910,7 @@ def users_add(
     Examples:
         ga4 users add 123456789 user@example.com --role analyst
         ga4 users add 123456789 user@example.com -r viewer --json
+        ga4 users add 123456789 user@example.com --role viewer --dry-run
     """
     _require_auth(json_output)
 
@@ -740,7 +926,23 @@ def users_add(
             json_output,
         )
 
-    client = AdminClient()
+    if dry_run:
+        result = {
+            "dry_run": True,
+            "action": "create_access_binding",
+            "would_send": {
+                "property_id": property_id,
+                "email": email,
+                "role": role.lower(),
+            },
+        }
+        if json_output:
+            _output_json({"data": result})
+        else:
+            console.print(f"[cyan]Would add {email} as {role} to property {property_id}[/cyan]")
+        return
+
+    client = AdminClient(profile=get_active_profile())
     try:
         binding = client.create_access_binding(property_id, email, role)
     except ValueError as e:
@@ -762,6 +964,7 @@ def users_add(
 def users_remove(
     property_id: Annotated[str, typer.Argument(help="Property ID")],
     email: Annotated[str, typer.Argument(help="User email address")],
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="Preview without making changes")] = False,
     json_output: Annotated[bool, typer.Option("--json", help="Output as JSON")] = False,
 ):
     """
@@ -770,12 +973,41 @@ def users_remove(
     Examples:
         ga4 users remove 123456789 user@example.com
         ga4 users remove 123456789 user@example.com --json
+        ga4 users remove 123456789 user@example.com --dry-run
     """
     _require_auth(json_output)
 
     from .admin_client import AdminClient
 
-    client = AdminClient()
+    if dry_run:
+        # Look up the binding to confirm it exists
+        client = AdminClient(profile=get_active_profile())
+        try:
+            bindings = client.list_access_bindings(property_id)
+            binding = next((b for b in bindings if b["user"] == email), None)
+        except Exception as e:
+            _error(f"Failed to look up user: {e}", "API_ERROR", EXIT_ERROR, as_json=json_output)
+
+        if not binding:
+            _error(f"User not found: {email}", "NOT_FOUND", EXIT_NOT_FOUND, {"email": email}, json_output)
+
+        result = {
+            "dry_run": True,
+            "action": "delete_access_binding",
+            "would_remove": {
+                "email": email,
+                "property_id": property_id,
+                "roles": binding.get("roles", []),
+            },
+        }
+        if json_output:
+            _output_json({"data": result})
+        else:
+            roles = ", ".join(binding.get("roles", []))
+            console.print(f"[cyan]Would remove {email} ({roles}) from property {property_id}[/cyan]")
+        return
+
+    client = AdminClient(profile=get_active_profile())
     try:
         client.delete_access_binding(property_id, email)
     except ValueError as e:
@@ -826,7 +1058,7 @@ def users_copy(
             as_json=json_output,
         )
 
-    client = AdminClient()
+    client = AdminClient(profile=get_active_profile())
 
     # Get users from source property
     try:
@@ -998,7 +1230,7 @@ def users_batch_add(
         return
 
     # Execute batch add
-    client = AdminClient()
+    client = AdminClient(profile=get_active_profile())
     try:
         created = client.batch_create_access_bindings(property_id, users)
     except Exception as e:

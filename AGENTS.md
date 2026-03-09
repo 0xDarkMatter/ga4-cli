@@ -59,6 +59,29 @@ Google Analytics 4 reporting and user management CLI.
 | `ga4 metrics list <property-id> [--json]` | List available metrics |
 | `ga4 metrics get <property-id> <api-name>` | Get metric details |
 
+### Health (Property Diagnostics)
+
+| Command | Description |
+|---------|-------------|
+| `ga4 health check <property-id> [--json]` | Full health check (tracking, access, config) |
+| `ga4 health access <property-id> [--json]` | Access audit only |
+| `ga4 health tracking <property-id> [--json]` | Tracking & data quality only |
+| `ga4 health summary <property-id> [--json]` | Quick one-line status |
+
+### Scan (Multi-Property)
+
+| Command | Description |
+|---------|-------------|
+| `ga4 scan all [--account ID] [--json]` | Health check all properties |
+| `ga4 scan access [--account ID] [--json]` | Access audit across properties |
+| `ga4 scan issues [--account ID] [--json]` | Only show problems |
+
+### Introspection
+
+| Command | Description |
+|---------|-------------|
+| `ga4 describe [--json]` | List all resources and actions (no auth required) |
+
 ## Authentication
 
 ```bash
@@ -136,6 +159,28 @@ ga4 reports realtime 123456789 -d country -m activeUsers
 
 # JSON output for scripting
 ga4 reports run 123456789 --json | jq '.data.rows[] | select(.sessions > "100")'
+```
+
+### Health Checks & Scanning
+
+```bash
+# Full health check on a property
+ga4 health check 123456789
+
+# Quick summary
+ga4 health summary 123456789
+
+# Access audit only
+ga4 health access 123456789 --json | jq '.data.checks'
+
+# Scan all properties for issues
+ga4 scan issues
+
+# Scan with JSON for scripting
+ga4 scan all --json | jq '.data.properties[] | select(.score < 60)'
+
+# Scan specific account
+ga4 scan all --account 123456789
 ```
 
 ### Dimensions & Metrics Discovery
