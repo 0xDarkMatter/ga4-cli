@@ -1,8 +1,8 @@
 ---
-name: ga4-recipe-client-onboard
+name: ga4-onboard
 description: "Onboard a new client: scan all GA4 properties, generate reports, identify issues. Triggers: new client, onboard, client setup, account audit, first review."
 version: 1.0.0
-category: recipe
+category: playbook
 tool: ga4
 requires:
   bins: ["ga4", "jq"]
@@ -103,23 +103,6 @@ ls output/*/report.md
 # Spot-check a single property
 cat output/<domain>-<property_id>/report.md
 ```
-
-## Using Profiles for Client Separation
-
-```bash
-# Login as client profile
-ga4 auth login --profile acme-corp
-
-# All commands use client credentials
-ga4 --profile acme-corp scan report --account 123456
-ga4 --profile acme-corp scan permissions --account 123456
-ga4 --profile acme-corp scan issues --account 123456
-
-# List all profiles
-ga4 auth list
-```
-
-Profiles are stored per-user and never shared between clients.
 
 ## Deliverables Checklist
 

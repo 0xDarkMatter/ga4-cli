@@ -1,8 +1,8 @@
 ---
-name: ga4-recipe-site-audit
+name: ga4-site-audit
 description: "Full GA4 site audit with health check, tag spider, and markdown report. Triggers: site audit, audit property, check site, ga4 audit, full diagnostic."
 version: 1.0.0
-category: recipe
+category: playbook
 tool: ga4
 requires:
   bins: ["ga4", "jq"]
