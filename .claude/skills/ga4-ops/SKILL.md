@@ -1,32 +1,87 @@
 ---
 name: ga4-ops
-description: "Google Analytics 4 CLI operations for property management, user access control, and cross-org migrations. Use when: (1) Managing GA4 users (add, remove, copy, batch), (2) Listing accounts/properties, (3) Looker Studio migrations (granting viewer access), (4) Bulk user provisioning, (5) Any GA4 property or access management task. Triggers: ga4, google analytics, property access, looker studio, analytics users, grant access, migrate users."
+description: "Google Analytics 4 CLI for property management, health checks, and user access. Triggers: ga4, google analytics, property access, analytics users, grant access."
+version: 2.0.0
+category: operations
+tool: ga4
+requires:
+  bins: ["ga4"]
+allowed-tools: "Read Bash Grep"
 ---
 
 # GA4 Operations
 
-CLI tool for Google Analytics 4 property management and user access control.
+CLI tool for Google Analytics 4 property management, user access control, and property health.
 
-## Quick Reference
+## Auth Check
 
 ```bash
-# Auth
-ga4 auth login                    # OAuth2 browser flow
-ga4 auth status --json            # Check auth state
-ga4 auth logout                   # Clear credentials
+ga4 auth status --json                          # Check active profile
+ga4 --profile analytics auth status --json      # Check named profile
+ga4 auth list                                   # Show all profiles
+```
 
-# Discovery
-ga4 accounts list --json          # All accounts
-ga4 properties list --json        # All properties
-ga4 properties list --account ID  # Filter by account
-ga4 properties get ID --json      # Property details
+## Profile Management
 
-# User Management
-ga4 users list PROPERTY_ID --json
-ga4 users add PROPERTY_ID EMAIL --role ROLE
-ga4 users remove PROPERTY_ID EMAIL
-ga4 users copy SRC_PROP DEST_PROP [--dry-run]
-ga4 users batch-add PROPERTY_ID FILE [--dry-run]
+```bash
+ga4 auth login                                  # Default profile
+ga4 auth login --profile analytics             # Named profile
+ga4 auth logout --profile analytics
+
+export GA4_PROFILE=analytics                    # Set default via env var
+```
+
+## Common Operations
+
+### Accounts and Properties
+
+```bash
+ga4 accounts list --json
+ga4 properties list --json
+ga4 properties list --account <account-id> --json
+ga4 properties get <property-id> --json
+
+# Filter with jq
+ga4 properties list --json | jq '.data[] | {id, name}'
+ga4 properties list --json | jq -r '.data[] | select(.name | contains("Production")) | .id'
+```
+
+### User Management
+
+```bash
+ga4 users list <property-id> --json
+ga4 users add <property-id> user@example.com --role viewer
+ga4 users remove <property-id> user@example.com
+ga4 users copy <src-id> <dest-id> [--dry-run]
+ga4 users copy <src-id> <dest-id> --role analyst --exclude admin@old.com
+ga4 users batch-add <property-id> users.csv [--dry-run]
+```
+
+### Health Check
+
+```bash
+ga4 health check <property-id>
+ga4 health check <property-id> --json | jq '.data.score'
+```
+
+See `ga4-health` skill for full diagnostic workflows.
+
+### Multi-Property Scan
+
+```bash
+ga4 scan all
+ga4 scan issues
+ga4 scan report
+```
+
+See `ga4-health` skill for scan workflows and score interpretation.
+
+### Cache Management
+
+```bash
+ga4 cache status
+ga4 cache clear
+ga4 health check <property-id> --no-cache      # Skip cache for fresh data
 ```
 
 ## Roles
@@ -48,40 +103,56 @@ ga4 users batch-add PROPERTY_ID FILE [--dry-run]
 | 4 | Validation error | Check inputs |
 | 5 | Forbidden | Check permissions |
 
-## Common Workflows
+## Output Fields
 
-### Grant Looker Studio Access
+All commands return a `{data, meta}` envelope:
 
-Looker Studio requires `viewer` role on the GA4 property:
-
-```bash
-# Single user
-ga4 users add 123456789 user@example.com --role viewer
-
-# Batch from file
-ga4 users batch-add 123456789 users.csv --dry-run
-ga4 users batch-add 123456789 users.csv
+```json
+{
+  "data": [...],
+  "meta": {
+    "total": 42,
+    "cached": true,
+    "cache_age_seconds": 120
+  }
+}
 ```
 
-### Cross-Org User Migration
+| Field | Type | Description |
+|-------|------|-------------|
+| `data` | array/object | The primary result payload |
+| `meta.total` | int | Total record count (before any limit) |
+| `meta.cached` | bool | Whether result came from cache |
+| `meta.cache_age_seconds` | int | Age of cached response in seconds |
 
-Copy users between properties (e.g., agency transition):
+## Gotchas
 
-```bash
-# Preview first
-ga4 users copy 123456789 987654321 --dry-run
+- **Rate limits**: GA4 Admin API is quota-limited. Use cache (default TTL: 1 hour) and avoid `--no-cache` in loops.
+- **Account vs property access**: Users granted at account level do not appear in property-level listings. If `users list` returns empty, check account-level bindings.
+- **Token expiry**: OAuth tokens expire. Run `ga4 auth status` before long operations; re-auth with `ga4 auth login` if needed.
+- **Cache TTL**: Default 1-hour cache means newly added users/properties may not appear immediately. Use `ga4 cache clear` or `--no-cache` to force fresh data.
+- **Multi-profile**: When managing multiple clients, always specify `--profile` or set `GA4_PROFILE` to avoid cross-account mutations.
+- **Dry-run first**: `--dry-run` is available on `users copy` and `users batch-add`. Always use it before executing bulk changes.
 
-# Execute
-ga4 users copy 123456789 987654321
+## Pipe Patterns
 
-# Filter by role
-ga4 users copy 123456789 987654321 --role analyst
+| Chain | Command | Use Case |
+|-------|---------|----------|
+| → jq | `ga4 properties list --json \| jq '.data[] \| {id, name}'` | Extract/filter properties |
+| → jq | `ga4 users list <id> --json \| jq -r '.data[].user'` | Export user list |
+| → fslack | `ga4 scan issues --json \| fslack messages send --channel analytics-alerts` | Alert on failing properties |
+| → gsc | `ga4 properties list --json \| jq -r '.data[].id'` then `gsc sites list` | Cross-reference GA4 + GSC properties |
+| ← gsc | `gsc analytics --json \| ga4 ...` | Combine search + analytics data |
+| → file | `ga4 users list <id> --json \| jq '[.data[] \| {email: .user, role: .roles[0]}]' > users.json` | Export for batch-add |
 
-# Exclude specific users
-ga4 users copy 123456789 987654321 --exclude admin@old.com,owner@old.com
+## Bulk User Provisioning
+
+**CSV format** (`users.csv`):
+```csv
+email,role
+alice@example.com,analyst
+bob@example.com,viewer
 ```
-
-### Bulk User Provisioning
 
 **JSON format** (`users.json`):
 ```json
@@ -91,171 +162,13 @@ ga4 users copy 123456789 987654321 --exclude admin@old.com,owner@old.com
 ]
 ```
 
-**CSV format** (`users.csv`):
-```csv
-email,role
-alice@example.com,analyst
-bob@example.com,viewer
-```
-
 ```bash
-ga4 users batch-add 123456789 users.json --dry-run
-ga4 users batch-add 123456789 users.json
-```
-
-### Property Discovery
-
-```bash
-# Find all properties
-ga4 properties list --json | jq '.data[] | {id, name}'
-
-# Find by name pattern
-ga4 properties list --json | jq '.data[] | select(.name | contains("Production"))'
-
-# Get property ID for a specific name
-ga4 properties list --json | jq -r '.data[] | select(.name == "My Site") | .id'
-```
-
-## jq Patterns
-
-### Extract Data
-
-```bash
-# Property IDs only
-ga4 properties list --json | jq -r '.data[].id'
-
-# User emails on a property
-ga4 users list 123456789 --json | jq -r '.data[].user'
-
-# Count users by role
-ga4 users list 123456789 --json | jq '[.data[].roles[]] | group_by(.) | map({role: .[0], count: length})'
-```
-
-### Filter Results
-
-```bash
-# Properties in specific timezone
-ga4 properties list --json | jq '.data[] | select(.time_zone == "America/New_York")'
-
-# Users with admin role
-ga4 users list 123456789 --json | jq '.data[] | select(.roles | contains(["admin"]))'
-
-# Properties created after date
-ga4 properties list --json | jq '.data[] | select(.create_time > "2024-01-01")'
-```
-
-### Transform for Other Tools
-
-```bash
-# Create CSV of users
-ga4 users list 123456789 --json | jq -r '.data[] | [.user, (.roles | join(";"))] | @csv'
-
-# Export for batch-add to another property
-ga4 users list 123456789 --json | jq '[.data[] | {email: .user, role: .roles[0]}]' > users.json
-```
-
-## Error Handling
-
-```bash
-# Check auth before operations
-if ! ga4 auth status --json | jq -e '.data.authenticated' > /dev/null; then
-  ga4 auth login
-fi
-
-# Handle not found
-ga4 properties get 999999999 --json 2>&1 || echo "Property not found"
-
-# Validate role before adding
-ROLE="analyst"
-if [[ ! "$ROLE" =~ ^(viewer|analyst|editor|admin)$ ]]; then
-  echo "Invalid role: $ROLE"
-  exit 4
-fi
-```
-
-## Account vs Property Access
-
-Access can be granted at two levels:
-
-| Level | Scope | API |
-|-------|-------|-----|
-| Account | All properties under account | `accounts/{id}/accessBindings` |
-| Property | Single property only | `properties/{id}/accessBindings` |
-
-**Note:** When listing property users, the list may be empty if access is granted at the account level. Check account-level bindings if property-level returns empty.
-
-## Credential Storage
-
-| Location | Priority | Use Case |
-|----------|----------|----------|
-| Environment vars | 1 | CI/CD, automation |
-| OS Keyring | 2 | Interactive use |
-
-Environment variables:
-- `GA4_ACCESS_TOKEN` - OAuth access token
-- `GA4_REFRESH_TOKEN` - OAuth refresh token
-- `GA4_CREDENTIALS_PATH` - Path to OAuth client JSON
-
-## Health Checks & Scanning
-
-### Single Property Health
-
-```bash
-# Full diagnostic (async prefetch — all API calls concurrent)
-ga4 health check 123456789
-ga4 health check 123456789 --json | jq '.data.score'
-
-# Category-specific (only fetches needed data)
-ga4 health access 123456789        # User access audit
-ga4 health tracking 123456789      # Data quality checks
-ga4 health summary 123456789       # One-line score
-```
-
-### Multi-Property Scanning
-
-```bash
-# Scan all properties (3 concurrent workers by default)
-ga4 scan all
-ga4 scan all --workers 5           # 5 concurrent properties
-ga4 scan all --account 123456789   # Filter to one account
-
-# Access audit across all properties
-ga4 scan access --json | jq '.data.properties[] | {property_name, score}'
-
-# Only show problems
-ga4 scan issues
-ga4 scan issues --json | jq '.data.properties[].checks[] | select(.status == "fail")'
-```
-
-### Health Check Categories
-
-| Category | Checks | What It Finds |
-|----------|--------|---------------|
-| tracking | data_recency, realtime, sessions, bounce, not_set | Broken tracking, data gaps |
-| access | user_count, admin_count, external_domains, roles | Access sprawl, security |
-| config | property_config, custom_dimensions | Missing settings |
-
-### jq Patterns for Health Data
-
-```bash
-# Properties scoring below 70
-ga4 scan all --json | jq '.data.properties[] | select(.score < 70) | {property_name, score, grade}'
-
-# All failing checks
-ga4 health check 123456789 --json | jq '.data.checks[] | select(.status == "fail")'
-
-# Average score across all properties
-ga4 scan all --json | jq '.data.overall.avg_score'
-```
-
-### Introspection
-
-```bash
-ga4 describe --json          # List all resources and actions
-ga4 describe --json | jq '.data.resources | keys'
+ga4 users batch-add <property-id> users.csv --dry-run
+ga4 users batch-add <property-id> users.csv
 ```
 
 ## See Also
 
-- [references/api-endpoints.md](references/api-endpoints.md) - Full API endpoint reference
-- [references/migration-patterns.md](references/migration-patterns.md) - Complex migration scenarios
+- `ga4-health` — Property health diagnostics, scoring, and site spider
+- [references/api-endpoints.md](references/api-endpoints.md) — Full API endpoint reference
+- [references/migration-patterns.md](references/migration-patterns.md) — Complex migration scenarios
