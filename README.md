@@ -1,27 +1,31 @@
 # ga4
 
-> Google Analytics 4 reporting and data analysis
+> Google Analytics 4 property management, health diagnostics, and schema replication
 
 ## Installation
 
 ```bash
-cd X:\Fabric\Ga4
+cd X:\Fabric\GA4
 uv pip install -e .
 ```
 
 ## Quick Start
 
 ```bash
-# Authenticate
+# Authenticate (default profile)
 ga4 auth login
+
+# Authenticate with named profile
+ga4 auth login --profile roam
 
 # Check status
 ga4 auth status
+ga4 auth list              # Show all profiles
 
 # List resources
 ga4 accounts list
 ga4 properties list
-ga4 users list <property-id>
+ga4 --profile roam properties list --account 16621930
 ```
 
 ## Commands
@@ -30,21 +34,19 @@ ga4 users list <property-id>
 
 | Command | Description |
 |---------|-------------|
-| `ga4 auth login` | Authenticate via OAuth2 |
+| `ga4 auth login [--profile NAME]` | Authenticate via OAuth2 |
 | `ga4 auth status [--json]` | Check auth status |
-| `ga4 auth logout` | Clear credentials |
+| `ga4 auth logout [--profile NAME]` | Clear credentials |
+| `ga4 auth list` | List all profiles |
 
-### Accounts
+Global flag `--profile NAME` (or env `GA4_PROFILE`) selects the auth profile for any command.
+
+### Accounts & Properties
 
 | Command | Description |
 |---------|-------------|
 | `ga4 accounts list [--json]` | List GA4 accounts |
-
-### Properties
-
-| Command | Description |
-|---------|-------------|
-| `ga4 properties list [--json]` | List properties |
+| `ga4 properties list [--account ID] [--json]` | List properties |
 | `ga4 properties get <id> [--json]` | Get specific property |
 
 ### Users (Access Management)
@@ -52,10 +54,10 @@ ga4 users list <property-id>
 | Command | Description |
 |---------|-------------|
 | `ga4 users list <property-id> [--json]` | List users with access |
-| `ga4 users add <property-id> <email> --role <role>` | Add user access |
-| `ga4 users remove <property-id> <email>` | Remove user access |
+| `ga4 users add <property-id> <email> --role <role> [--dry-run]` | Add user access |
+| `ga4 users remove <property-id> <email> [--dry-run]` | Remove user access |
 | `ga4 users copy <src> <dest> [--dry-run]` | Copy users between properties |
-| `ga4 users batch-add <property-id> <file>` | Add users from JSON/CSV |
+| `ga4 users batch-add <property-id> <file> [--dry-run]` | Add users from JSON/CSV |
 
 **Roles:** `viewer`, `analyst`, `editor`, `admin`
 
@@ -66,14 +68,7 @@ ga4 users list <property-id>
 | `ga4 reports run <property-id> [OPTIONS]` | Run a custom report |
 | `ga4 reports realtime <property-id> [OPTIONS]` | Run a realtime report |
 
-**Report Options:**
-- `-d, --dimensions` - Dimensions (comma-separated, default: date)
-- `-m, --metrics` - Metrics (comma-separated, default: activeUsers,sessions)
-- `--from` - Start date (YYYY-MM-DD or relative like "30daysAgo")
-- `--to` - End date (YYYY-MM-DD or relative like "today")
-- `-n, --limit` - Max rows (default: 100)
-- `-o, --order-by` - Sort by dimension or metric
-- `--asc` - Sort ascending (default: descending)
+**Options:** `-d dimensions`, `-m metrics`, `--from`, `--to`, `-n limit`, `-o order-by`, `--asc`
 
 ### Dimensions & Metrics
 
@@ -88,18 +83,39 @@ ga4 users list <property-id>
 
 | Command | Description |
 |---------|-------------|
-| `ga4 health check <property-id> [--json]` | Full health check (tracking, access, config) |
+| `ga4 health check <property-id> [--json] [--no-cache]` | Full 24-check diagnostic |
 | `ga4 health access <property-id> [--json]` | Access audit only |
 | `ga4 health tracking <property-id> [--json]` | Tracking & data quality only |
-| `ga4 health summary <property-id> [--json]` | Quick one-line status |
+| `ga4 health summary <property-id> [--json]` | Quick one-line score |
+| `ga4 health report <property-id> [-o DIR] [--spider N] [--no-cache]` | Full markdown report with site spider |
 
 ### Scan (Multi-Property)
 
 | Command | Description |
 |---------|-------------|
 | `ga4 scan all [--account ID] [--json]` | Health check all properties |
-| `ga4 scan access [--account ID] [--json]` | Access audit across properties |
 | `ga4 scan issues [--account ID] [--json]` | Only show problems |
+| `ga4 scan report [--account ID] [-o DIR]` | Generate reports for all properties |
+| `ga4 scan permissions [--account ID] [--json]` | Cross-property permission matrix |
+
+### Schema (Export & Deploy)
+
+| Command | Description |
+|---------|-------------|
+| `ga4 schema export <property-id> -o FILE` | Export property schema to JSON |
+| `ga4 schema deploy FILE --account ID --name NAME --url URL` | Create new property with schema |
+| `ga4 schema deploy FILE --property ID` | Apply schema to existing property |
+
+Both commands support `--dry-run` and `--json`.
+
+**Exported schema includes:** custom dimensions, custom metrics, key events, enhanced measurement settings, data retention, audiences.
+
+### Cache
+
+| Command | Description |
+|---------|-------------|
+| `ga4 cache` | Show cache status |
+| `ga4 cache clear` | Clear all cached data |
 
 ### Introspection
 
@@ -107,77 +123,37 @@ ga4 users list <property-id>
 |---------|-------------|
 | `ga4 describe [--json]` | List all resources and actions |
 
-## Health Checks
+## Health Checks (24 checks)
+
+| Category | Checks |
+|----------|--------|
+| **Tracking** | Data recency, realtime, session volume, (not set), bounce rate, engagement, traffic trend, event diversity |
+| **Config** | Property config, data streams, key events, custom dims/metrics, enhanced measurement, audiences, ads links, data retention |
+| **Access** | User count, admin count, external domains, role distribution |
+| **Tags** | Double-tagging, self-referrals, hostname fragmentation, channel grouping |
+
+Scoring: 0-100, Grades: A (≥90), B (≥75), C (≥60), D (≥40), F (<40)
+
+## Schema Replication
+
+Export a template property's schema once, deploy to new sites repeatedly:
 
 ```bash
-# Full health check on a property
-ga4 health check 123456789
+# Export template
+ga4 --profile roam schema export 309144142 -o roam-schema.json
 
-# Quick one-line summary
-ga4 health summary 123456789
+# Preview deploy
+ga4 --profile roam schema deploy roam-schema.json \
+  --account 16621930 --name "newsite.com.au - GA4" \
+  --url "https://www.newsite.com.au" --dry-run
 
-# Access audit only
-ga4 health access 123456789
+# Deploy for real
+ga4 --profile roam schema deploy roam-schema.json \
+  --account 16621930 --name "newsite.com.au - GA4" \
+  --url "https://www.newsite.com.au"
 
-# Tracking & data quality
-ga4 health tracking 123456789
-
-# Scan all properties for issues
-ga4 scan issues
-
-# Scan all properties (full report)
-ga4 scan all --json | jq '.data.overall'
-
-# Scan specific account
-ga4 scan all --account 123456789
-```
-
-**Health checks include:**
-- Data recency (is data flowing?)
-- Session volume and bounce rate
-- (not set) prevalence in source dimension
-- User count and admin count
-- External domain detection
-- Role distribution analysis
-- Property configuration (timezone, currency, industry)
-- Custom dimensions/metrics
-
-## Usage Examples
-
-```bash
-# List properties and filter with jq
-ga4 properties list --json | jq '.data[0]'
-
-# Run a report
-ga4 reports run 123456789 -d date -m activeUsers,sessions
-ga4 reports run 123456789 -d date,city -m sessions --from 2025-01-01 --to 2025-01-31
-ga4 reports run 123456789 --json | jq '.data.rows'
-
-# Realtime report
-ga4 reports realtime 123456789 -d country -m activeUsers
-
-# List available dimensions and metrics
-ga4 dimensions list 123456789
-ga4 metrics list 123456789 --category User
-
-# Add user to property
-ga4 users add 123456789 user@example.com --role analyst
-
-# List users on property
-ga4 users list 123456789
-
-# Remove user from property
-ga4 users remove 123456789 user@example.com
-
-# Copy users between properties (for Looker Studio migrations)
-ga4 users copy 123456789 987654321 --dry-run  # Preview
-ga4 users copy 123456789 987654321            # Execute
-ga4 users copy 123456789 987654321 --role analyst  # Only analysts
-ga4 users copy 123456789 987654321 --exclude admin@example.com
-
-# Batch add users from file
-ga4 users batch-add 123456789 users.json --dry-run
-ga4 users batch-add 123456789 users.csv
+# Apply to existing property (skips duplicates)
+ga4 --profile roam schema deploy roam-schema.json --property 461067940
 ```
 
 ## Exit Codes
@@ -190,6 +166,7 @@ ga4 users batch-add 123456789 users.csv
 | 3 | Not found |
 | 4 | Validation error |
 | 5 | Forbidden |
+| 6 | Rate limited |
 
 ## Protocol
 
