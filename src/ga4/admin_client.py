@@ -113,6 +113,32 @@ class AdminClient:
         response.raise_for_status()
         return response.json()
 
+    def _patch(self, endpoint: str, data: dict, params: dict = None) -> Optional[dict]:
+        """Make PATCH request."""
+        response = httpx.patch(
+            f"{self.BASE_URL}/{endpoint}",
+            headers=self._headers(),
+            json=data,
+            params=params,
+            timeout=self.TIMEOUT,
+        )
+        self._check_rate_limit(response)
+        response.raise_for_status()
+        return response.json()
+
+    def _patch_alpha(self, endpoint: str, data: dict, params: dict = None) -> Optional[dict]:
+        """Make PATCH request to alpha API."""
+        response = httpx.patch(
+            f"{self.BASE_URL_ALPHA}/{endpoint}",
+            headers=self._headers(),
+            json=data,
+            params=params,
+            timeout=self.TIMEOUT,
+        )
+        self._check_rate_limit(response)
+        response.raise_for_status()
+        return response.json()
+
     def _delete_alpha(self, endpoint: str) -> bool:
         """Make DELETE request to alpha API."""
         response = httpx.delete(
@@ -467,6 +493,164 @@ class AdminClient:
             }
         except Exception:
             return {}
+
+    # --- Schema Create/Update Methods (for schema deploy) ---
+
+    def create_property(
+        self, account_id: str, display_name: str, time_zone: str = "Australia/Brisbane",
+        currency: str = "AUD", industry_category: str = "TRAVEL",
+    ) -> dict:
+        """Create a new GA4 property under an account."""
+        if not account_id.startswith("accounts/"):
+            account_id = f"accounts/{account_id}"
+
+        data = self._post("properties", {
+            "parent": account_id,
+            "displayName": display_name,
+            "timeZone": time_zone,
+            "currencyCode": currency,
+            "industryCategory": industry_category,
+        })
+        return {
+            "id": data.get("name", "").replace("properties/", ""),
+            "name": data.get("displayName", ""),
+            "account": data.get("account", ""),
+        }
+
+    def create_data_stream(
+        self, property_id: str, display_name: str, default_uri: str,
+    ) -> dict:
+        """Create a web data stream on a property."""
+        if not property_id.startswith("properties/"):
+            property_id = f"properties/{property_id}"
+
+        data = self._post(f"{property_id}/dataStreams", {
+            "type": "WEB_DATA_STREAM",
+            "displayName": display_name,
+            "webStreamData": {"defaultUri": default_uri},
+        })
+        stream_id = data.get("name", "").split("/")[-1]
+        measurement_id = data.get("webStreamData", {}).get("measurementId", "")
+        return {
+            "stream_id": stream_id,
+            "name": data.get("name", ""),
+            "display_name": data.get("displayName", ""),
+            "measurement_id": measurement_id,
+            "default_uri": data.get("webStreamData", {}).get("defaultUri", ""),
+        }
+
+    def create_custom_dimension(
+        self, property_id: str, parameter_name: str, display_name: str,
+        scope: str = "EVENT", description: str = "",
+    ) -> dict:
+        """Create a custom dimension on a property."""
+        if not property_id.startswith("properties/"):
+            property_id = f"properties/{property_id}"
+
+        data = self._post(f"{property_id}/customDimensions", {
+            "parameterName": parameter_name,
+            "displayName": display_name,
+            "scope": scope,
+            "description": description,
+        })
+        return {
+            "name": data.get("name", ""),
+            "parameter_name": data.get("parameterName", ""),
+            "display_name": data.get("displayName", ""),
+            "scope": data.get("scope", ""),
+        }
+
+    def create_custom_metric(
+        self, property_id: str, parameter_name: str, display_name: str,
+        scope: str = "EVENT", measurement_unit: str = "STANDARD",
+        description: str = "",
+    ) -> dict:
+        """Create a custom metric on a property."""
+        if not property_id.startswith("properties/"):
+            property_id = f"properties/{property_id}"
+
+        data = self._post(f"{property_id}/customMetrics", {
+            "parameterName": parameter_name,
+            "displayName": display_name,
+            "scope": scope,
+            "measurementUnit": measurement_unit,
+            "description": description,
+        })
+        return {
+            "name": data.get("name", ""),
+            "parameter_name": data.get("parameterName", ""),
+            "display_name": data.get("displayName", ""),
+        }
+
+    def create_key_event(
+        self, property_id: str, event_name: str,
+        counting_method: str = "ONCE_PER_EVENT",
+    ) -> dict:
+        """Create a key event (conversion) on a property."""
+        if not property_id.startswith("properties/"):
+            property_id = f"properties/{property_id}"
+
+        data = self._post(f"{property_id}/keyEvents", {
+            "eventName": event_name,
+            "countingMethod": counting_method,
+        })
+        return {
+            "name": data.get("name", ""),
+            "event_name": data.get("eventName", ""),
+            "counting_method": data.get("countingMethod", ""),
+        }
+
+    def update_enhanced_measurement(
+        self, property_id: str, stream_id: str, settings: dict,
+    ) -> dict:
+        """Update enhanced measurement settings for a web data stream (v1alpha)."""
+        if not property_id.startswith("properties/"):
+            property_id = f"properties/{property_id}"
+
+        stream_name = f"{property_id}/dataStreams/{stream_id}"
+        endpoint = f"{stream_name}/enhancedMeasurementSettings"
+
+        # Map our snake_case keys to API camelCase
+        api_body = {}
+        field_map = {
+            "stream_enabled": "streamEnabled",
+            "scrolls_enabled": "scrollsEnabled",
+            "outbound_clicks_enabled": "outboundClicksEnabled",
+            "site_search_enabled": "siteSearchEnabled",
+            "video_engagement_enabled": "videoEngagementEnabled",
+            "file_downloads_enabled": "fileDownloadsEnabled",
+            "page_changes_enabled": "pageChangesEnabled",
+            "form_interactions_enabled": "formInteractionsEnabled",
+            "search_query_parameter": "searchQueryParameter",
+        }
+        update_fields = []
+        for our_key, api_key in field_map.items():
+            if our_key in settings:
+                api_body[api_key] = settings[our_key]
+                update_fields.append(api_key)
+
+        data = self._patch_alpha(
+            endpoint, api_body,
+            params={"updateMask": ",".join(update_fields)},
+        )
+        return data or {}
+
+    def update_data_retention_settings(
+        self, property_id: str, event_retention: str, reset_on_new_activity: bool = True,
+    ) -> dict:
+        """Update data retention settings for a property."""
+        if not property_id.startswith("properties/"):
+            property_id = f"properties/{property_id}"
+
+        data = self._patch(
+            f"{property_id}/dataRetentionSettings",
+            {
+                "eventDataRetention": event_retention,
+                "resetUserDataOnNewActivity": reset_on_new_activity,
+            },
+            params={"updateMask": "eventDataRetention,resetUserDataOnNewActivity"},
+        )
+        return data or {}
 
     # --- Access Binding (User Management) Methods ---
 

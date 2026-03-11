@@ -114,7 +114,8 @@ def _run_health_check(
 
     cache = None if no_cache else Cache()
     start = time.time()
-    console.print(f"[dim]Checking property {property_id}...[/dim]")
+    if not json_output:
+        console.print(f"[dim]Checking property {property_id}...[/dim]")
 
     try:
         ctx, results, score_info = asyncio.run(
@@ -305,7 +306,8 @@ def health_report(
 
     cache = None if no_cache else Cache()
     start = time.time()
-    console.print(f"[dim]Generating report for property {property_id}...[/dim]")
+    if not json_output:
+        console.print(f"[dim]Generating report for property {property_id}...[/dim]")
 
     try:
         ctx, results, score_info, spider_result = asyncio.run(

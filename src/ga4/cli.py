@@ -23,6 +23,7 @@ from .config import (
 )
 from .health_cli import health_app
 from .scan_cli import scan_app
+from .schema_cli import schema_app
 from .shared import (
     EXIT_AUTH_REQUIRED,
     EXIT_CONFLICT,
@@ -78,6 +79,7 @@ def main(
 # Register health and scan sub-apps
 app.add_typer(health_app, name="health")
 app.add_typer(scan_app, name="scan")
+app.add_typer(schema_app, name="schema")
 
 
 # =============================================================================
