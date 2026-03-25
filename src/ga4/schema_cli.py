@@ -32,6 +32,7 @@ def _export_schema(property_id: str, admin: AdminClient) -> dict:
     custom_metrics = admin.list_custom_metrics(property_id)
     key_events = admin.list_key_events(property_id)
     audiences = admin.list_audiences(property_id)
+    channel_groups = admin.list_channel_groups(property_id)
     retention = admin.get_data_retention_settings(property_id)
 
     # Enhanced measurement from first web stream
@@ -87,6 +88,18 @@ def _export_schema(property_id: str, admin: AdminClient) -> dict:
         if a["display_name"] not in system_audiences
     ]
 
+    # Custom channel groups only (skip system-defined)
+    export_channel_groups = [
+        {
+            "display_name": g["display_name"],
+            "description": g.get("description", ""),
+            "primary": g.get("primary", False),
+            "grouping_rule": g.get("grouping_rule", []),
+        }
+        for g in channel_groups
+        if not g.get("system_defined", False)
+    ]
+
     return {
         "schema_version": "1.0",
         "exported_at": datetime.now(timezone.utc).isoformat(),
@@ -102,6 +115,7 @@ def _export_schema(property_id: str, admin: AdminClient) -> dict:
         "custom_metrics": export_metrics,
         "key_events": custom_key_events,
         "audiences": export_audiences,
+        "channel_groups": export_channel_groups,
         "enhanced_measurement": enhanced,
         "data_retention": retention,
     }
@@ -176,6 +190,10 @@ def _print_schema_summary(schema: dict):
     audiences = schema.get("audiences", [])
     table.add_row("Audiences", str(len(audiences)),
                   ", ".join(a["display_name"] for a in audiences) if audiences else "—")
+
+    cgroups = schema.get("channel_groups", [])
+    table.add_row("Channel Groups", str(len(cgroups)),
+                  ", ".join(g["display_name"] for g in cgroups) if cgroups else "—")
 
     em = schema.get("enhanced_measurement", {})
     enabled = [k.replace("_enabled", "") for k, v in em.items()
@@ -325,9 +343,11 @@ def _build_deploy_plan(
             "detail": schema["data_retention"].get("event_data_retention", ""),
         })
 
-    # Note: audiences skipped in deploy for now — filter clauses are complex
-    # and the export doesn't capture the full filterClauses structure.
-    # Custom audiences need manual setup or a future enhancement.
+    for g in schema.get("channel_groups", []):
+        plan["steps"].append({
+            "action": "create_channel_group",
+            "detail": f"{g['display_name']} ({len(g.get('grouping_rule', []))} channels)",
+        })
 
     return plan
 
@@ -369,6 +389,7 @@ def _execute_deploy(
         "stream_id": None,
         "measurement_id": None,
         "created": [],
+        "skipped": [],
         "errors": [],
     }
 
@@ -438,6 +459,7 @@ def _execute_deploy(
             err_msg = str(e)
             # Already exists is OK
             if "ALREADY_EXISTS" in err_msg or "409" in err_msg:
+                results["skipped"].append({"type": "custom_dimension", "parameter": d["parameter_name"]})
                 if not json_output:
                     console.print(f"  [dim]–[/dim] Custom dimension: {d['parameter_name']} (already exists)")
             else:
@@ -460,6 +482,7 @@ def _execute_deploy(
         except Exception as e:
             err_msg = str(e)
             if "ALREADY_EXISTS" in err_msg or "409" in err_msg:
+                results["skipped"].append({"type": "custom_metric", "parameter": m["parameter_name"]})
                 if not json_output:
                     console.print(f"  [dim]–[/dim] Custom metric: {m['parameter_name']} (already exists)")
             else:
@@ -480,6 +503,7 @@ def _execute_deploy(
         except Exception as e_err:
             err_msg = str(e_err)
             if "ALREADY_EXISTS" in err_msg or "409" in err_msg:
+                results["skipped"].append({"type": "key_event", "event_name": e["event_name"]})
                 if not json_output:
                     console.print(f"  [dim]–[/dim] Key event: {e['event_name']} (already exists)")
             else:
@@ -517,6 +541,36 @@ def _execute_deploy(
             if not json_output:
                 console.print(f"  [red]✗[/red] Data retention: {e}")
 
+    # Channel groups — deduplicate by display name since the API doesn't
+    schema_groups = schema.get("channel_groups", [])
+    if schema_groups:
+        try:
+            existing_groups = admin.list_channel_groups(pid)
+            existing_names = {g["display_name"] for g in existing_groups}
+        except Exception:
+            existing_names = set()
+
+        for g in schema_groups:
+            if g["display_name"] in existing_names:
+                results["skipped"].append({"type": "channel_group", "name": g["display_name"]})
+                if not json_output:
+                    console.print(f"  [dim]–[/dim] Channel group: {g['display_name']} (already exists)")
+                continue
+            try:
+                admin.create_channel_group(
+                    pid, g["display_name"], g.get("grouping_rule", []),
+                    description=g.get("description", ""),
+                    primary=g.get("primary", False),
+                )
+                results["created"].append({"type": "channel_group", "name": g["display_name"]})
+                if not json_output:
+                    console.print(f"  [green]✓[/green] Channel group: {g['display_name']}")
+            except Exception as e:
+                err_msg = str(e)
+                results["errors"].append({"step": f"channel_group:{g['display_name']}", "error": err_msg})
+                if not json_output:
+                    console.print(f"  [red]✗[/red] Channel group {g['display_name']}: {err_msg}")
+
     return results
 
 
@@ -531,9 +585,12 @@ def _print_deploy_results(results: dict):
         console.print(f"Measurement ID: [cyan]{mid}[/cyan]")
 
     created = len(results["created"])
+    skipped = len(results.get("skipped", []))
     errors = len(results["errors"])
 
+    parts = [f"[green]{created} created[/green]"]
+    if skipped:
+        parts.append(f"[dim]{skipped} skipped[/dim]")
     if errors:
-        console.print(f"\n[green]{created} created[/green], [red]{errors} errors[/red]")
-    else:
-        console.print(f"\n[green]{created} resources created successfully[/green]")
+        parts.append(f"[red]{errors} errors[/red]")
+    console.print(f"\n{', '.join(parts)}")

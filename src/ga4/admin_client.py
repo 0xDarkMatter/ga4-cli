@@ -652,6 +652,138 @@ class AdminClient:
         )
         return data or {}
 
+    # --- Channel Group Methods ---
+
+    def list_channel_groups(self, property_id: str) -> list:
+        """List channel groups for a property (v1alpha)."""
+        if not property_id.startswith("properties/"):
+            property_id = f"properties/{property_id}"
+
+        all_groups = []
+        page_token = None
+
+        while True:
+            params = {"pageSize": 200}
+            if page_token:
+                params["pageToken"] = page_token
+
+            data = self._get_alpha(f"{property_id}/channelGroups", params)
+            all_groups.extend(data.get("channelGroups", []))
+
+            page_token = data.get("nextPageToken")
+            if not page_token:
+                break
+
+        return [
+            {
+                "name": g.get("name", ""),
+                "display_name": g.get("displayName", ""),
+                "description": g.get("description", ""),
+                "system_defined": g.get("systemDefined", False),
+                "primary": g.get("primary", False),
+                "grouping_rule": g.get("groupingRule", []),
+            }
+            for g in all_groups
+        ]
+
+    def get_channel_group(self, property_id: str, channel_group_id: str) -> dict:
+        """Get a specific channel group (v1alpha)."""
+        if not property_id.startswith("properties/"):
+            property_id = f"properties/{property_id}"
+
+        data = self._get_alpha(f"{property_id}/channelGroups/{channel_group_id}")
+        return {
+            "name": data.get("name", ""),
+            "display_name": data.get("displayName", ""),
+            "description": data.get("description", ""),
+            "system_defined": data.get("systemDefined", False),
+            "primary": data.get("primary", False),
+            "grouping_rule": data.get("groupingRule", []),
+        }
+
+    def create_channel_group(
+        self, property_id: str, display_name: str,
+        grouping_rule: list, description: str = "",
+        primary: bool = False,
+    ) -> dict:
+        """Create a custom channel group (v1alpha).
+
+        Args:
+            property_id: Property ID.
+            display_name: Channel group name (max 80 chars).
+            grouping_rule: List of channel rules (API format).
+            description: Optional description (max 256 chars).
+            primary: Whether to set as default for reports.
+
+        Returns:
+            Created channel group dict.
+        """
+        if not property_id.startswith("properties/"):
+            property_id = f"properties/{property_id}"
+
+        body = {
+            "displayName": display_name,
+            "groupingRule": grouping_rule,
+        }
+        if description:
+            body["description"] = description
+        if primary:
+            body["primary"] = True
+
+        data = self._post_alpha(f"{property_id}/channelGroups", body)
+        return {
+            "name": data.get("name", ""),
+            "display_name": data.get("displayName", ""),
+            "description": data.get("description", ""),
+            "primary": data.get("primary", False),
+            "grouping_rule": data.get("groupingRule", []),
+        }
+
+    def update_channel_group(
+        self, property_id: str, channel_group_id: str,
+        display_name: str | None = None, grouping_rule: list | None = None,
+        description: str | None = None, primary: bool | None = None,
+    ) -> dict:
+        """Update a custom channel group (v1alpha)."""
+        if not property_id.startswith("properties/"):
+            property_id = f"properties/{property_id}"
+
+        body = {}
+        update_fields = []
+
+        if display_name is not None:
+            body["displayName"] = display_name
+            update_fields.append("displayName")
+        if grouping_rule is not None:
+            body["groupingRule"] = grouping_rule
+            update_fields.append("groupingRule")
+        if description is not None:
+            body["description"] = description
+            update_fields.append("description")
+        if primary is not None:
+            body["primary"] = primary
+            update_fields.append("primary")
+
+        data = self._patch_alpha(
+            f"{property_id}/channelGroups/{channel_group_id}",
+            body,
+            params={"updateMask": ",".join(update_fields)},
+        )
+        return {
+            "name": data.get("name", ""),
+            "display_name": data.get("displayName", ""),
+            "description": data.get("description", ""),
+            "primary": data.get("primary", False),
+            "grouping_rule": data.get("groupingRule", []),
+        }
+
+    def delete_channel_group(self, property_id: str, channel_group_id: str) -> bool:
+        """Delete a custom channel group (v1alpha)."""
+        if not property_id.startswith("properties/"):
+            property_id = f"properties/{property_id}"
+
+        return self._delete_alpha(f"{property_id}/channelGroups/{channel_group_id}")
+
     # --- Access Binding (User Management) Methods ---
 
     def list_access_bindings(self, property_id: str, limit: int = 200) -> list:
@@ -841,6 +973,70 @@ class AdminClient:
             "name": data.get("name", ""),
             "account": account_id,
         }
+
+    def delete_account_access_binding(self, account_id: str, email: str) -> bool:
+        """Remove a user's access from an account.
+
+        Args:
+            account_id: Account ID
+            email: User email to remove
+
+        Returns:
+            True if deleted
+
+        Raises:
+            ValueError: If user not found
+        """
+        bindings = self.list_account_access_bindings(account_id)
+        binding = next((b for b in bindings if b["user"] == email), None)
+
+        if not binding:
+            raise ValueError(f"User not found: {email}")
+
+        return self._delete_alpha(binding["name"])
+
+    def batch_create_account_access_bindings(
+        self, account_id: str, users: list[dict]
+    ) -> list[dict]:
+        """Add multiple users to an account.
+
+        Args:
+            account_id: Account ID
+            users: List of dicts with 'email' and 'role' keys
+
+        Returns:
+            List of created access bindings
+        """
+        if not account_id.startswith("accounts/"):
+            account_id = f"accounts/{account_id}"
+
+        requests = []
+        for user in users:
+            role = user.get("role", "viewer").lower()
+            if role not in ROLES:
+                raise ValueError(f"Invalid role: {role}")
+
+            requests.append({
+                "accessBinding": {
+                    "user": user["email"],
+                    "roles": [ROLES[role]],
+                }
+            })
+
+        data = self._post_alpha(
+            f"{account_id}/accessBindings:batchCreate",
+            {"requests": requests},
+        )
+
+        created = data.get("accessBindings", [])
+        return [
+            {
+                "id": b.get("name", "").split("/")[-1],
+                "user": b.get("user", ""),
+                "roles": [ROLE_DISPLAY.get(r, r) for r in b.get("roles", [])],
+            }
+            for b in created
+        ]
 
     def list_account_access_bindings(self, account_id: str) -> list:
         """List users with access to an account.

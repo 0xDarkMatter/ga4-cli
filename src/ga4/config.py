@@ -39,6 +39,7 @@ ENV_REFRESH_TOKEN = f"{TOOL_NAME.upper()}_REFRESH_TOKEN"
 # OAuth2 scopes for GA4
 SCOPES = [
     "https://www.googleapis.com/auth/analytics.readonly",
+    "https://www.googleapis.com/auth/analytics.edit",
     "https://www.googleapis.com/auth/analytics.manage.users",
 ]
 
@@ -144,7 +145,7 @@ def get_tokens(profile: str = DEFAULT_PROFILE) -> Optional[dict]:
 
     # Try keyring for the requested profile
     try:
-        tokens_json = keyring.get_password(f"fabric-{TOOL_NAME}", _keyring_entry(profile))
+        tokens_json = keyring.get_password(f"clique-{TOOL_NAME}", _keyring_entry(profile))
         if tokens_json:
             tokens = json.loads(tokens_json)
             tokens["source"] = "keyring"
@@ -188,7 +189,7 @@ def save_tokens(
 
     try:
         keyring.set_password(
-            f"fabric-{TOOL_NAME}",
+            f"clique-{TOOL_NAME}",
             _keyring_entry(profile),
             json.dumps(tokens, separators=(",", ":")),
         )
@@ -218,7 +219,7 @@ def clear_credentials(profile: str = DEFAULT_PROFILE) -> None:
 def _clear_one_profile(profile: str) -> None:
     """Delete the keyring entry for a single profile."""
     try:
-        keyring.delete_password(f"fabric-{TOOL_NAME}", _keyring_entry(profile))
+        keyring.delete_password(f"clique-{TOOL_NAME}", _keyring_entry(profile))
     except Exception:
         pass
 

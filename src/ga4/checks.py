@@ -46,6 +46,7 @@ class CheckContext:
     hostname_report: Optional[dict] = None  # hostnames sending data
     channel_report: Optional[dict] = None  # default channel grouping breakdown
     data_retention: Optional[dict] = None  # data retention settings
+    channel_groups: Optional[list] = None  # custom channel groups
 
 
 async def async_prefetch_context(
@@ -322,11 +323,26 @@ async def async_prefetch_context(
         except Exception:
             return None
 
+    async def _get_channel_groups():
+        if not need_config:
+            return None
+        cache_key = f"channel_groups_{property_id}"
+        cached = _cache_get(cache_key, TTL_MEDIUM)
+        if cached is not None:
+            return cached
+        try:
+            result = await admin_client.list_channel_groups(property_id)
+            _cache_set(cache_key, result)
+            return result
+        except Exception:
+            return None
+
     (
         property_info, access_bindings, weekly_report, realtime_report,
         metadata, source_report, account_access, engagement_report,
         data_streams, key_events, custom_dims, custom_metrics,
         ads_links, audiences, data_retention, hostname_report, channel_report,
+        channel_groups,
     ) = await asyncio.gather(
         _get_property(),
         _get_access(),
@@ -345,6 +361,7 @@ async def async_prefetch_context(
         _get_data_retention(),
         _get_hostnames(),
         _get_channels(),
+        _get_channel_groups(),
     )
 
     # Fetch enhanced measurement for the first web stream (needs stream ID)
@@ -385,6 +402,7 @@ async def async_prefetch_context(
         hostname_report=hostname_report,
         channel_report=channel_report,
         data_retention=data_retention,
+        channel_groups=channel_groups,
     )
 
 
@@ -575,6 +593,14 @@ def prefetch_context(
         except Exception:
             pass
 
+    # Channel groups
+    channel_groups = None
+    if need_config:
+        try:
+            channel_groups = admin_client.list_channel_groups(property_id)
+        except Exception:
+            pass
+
     return CheckContext(
         property_info=property_info,
         access_bindings=access_bindings,
@@ -594,6 +620,7 @@ def prefetch_context(
         hostname_report=hostname_report,
         channel_report=channel_report,
         data_retention=data_retention,
+        channel_groups=channel_groups,
     )
 
 
@@ -1640,6 +1667,47 @@ def check_data_retention(ctx: CheckContext) -> CheckResult:
         )
 
 
+def check_channel_groups(ctx: CheckContext) -> CheckResult:
+    """Check for custom channel groups (e.g. AI agent tracking)."""
+    if ctx.channel_groups is None:
+        return CheckResult(
+            name="channel_groups",
+            category="config",
+            status="warn",
+            message="Unable to fetch channel groups",
+            weight=0.3,
+        )
+
+    custom = [g for g in ctx.channel_groups if not g.get("system_defined", False)]
+    total = len(ctx.channel_groups)
+
+    details = {
+        "total": total,
+        "custom_count": len(custom),
+        "custom_names": [g["display_name"] for g in custom],
+    }
+
+    if custom:
+        names = ", ".join(g["display_name"] for g in custom)
+        return CheckResult(
+            name="channel_groups",
+            category="config",
+            status="pass",
+            message=f"{len(custom)} custom channel group(s): {names}",
+            details=details,
+            weight=0.3,
+        )
+    else:
+        return CheckResult(
+            name="channel_groups",
+            category="config",
+            status="warn",
+            message="No custom channel groups — consider adding AI agent tracking",
+            details=details,
+            weight=0.3,
+        )
+
+
 # =============================================================================
 # ACCESS CHECKS
 # =============================================================================
@@ -2120,6 +2188,7 @@ ALL_CHECKS = [
     {"fn": check_audiences, "category": "config"},
     {"fn": check_google_ads_link, "category": "config"},
     {"fn": check_data_retention, "category": "config"},
+    {"fn": check_channel_groups, "category": "config"},
     # Access (uses account-level fallback)
     {"fn": check_user_count, "category": "access"},
     {"fn": check_admin_count, "category": "access"},
