@@ -134,9 +134,9 @@ ga4 auth login
 ga4 auth status --json
 
 # Named profile (e.g. client account)
-ga4 auth login --profile roam
-ga4 --profile roam auth status
-ga4 --profile roam properties list
+ga4 auth login --profile client1
+ga4 --profile client1 auth status
+ga4 --profile client1 properties list
 
 # List all profiles
 ga4 auth list
@@ -148,20 +148,20 @@ ga4 auth list
 
 ```bash
 # Export template property schema
-ga4 --profile roam schema export 309144142 -o roam-schema.json
+ga4 --profile client1 schema export 309144142 -o template-schema.json
 
 # Preview what will be created
-ga4 --profile roam schema deploy roam-schema.json \
-  --account 16621930 --name "newsite.com.au - GA4" \
-  --url "https://www.newsite.com.au" --dry-run
+ga4 --profile client1 schema deploy template-schema.json \
+  --account 16621930 --name "example.com.au - GA4" \
+  --url "https://www.example.com.au" --dry-run
 
 # Deploy: creates property + stream + dims + events + settings
-ga4 --profile roam schema deploy roam-schema.json \
-  --account 16621930 --name "newsite.com.au - GA4" \
-  --url "https://www.newsite.com.au"
+ga4 --profile client1 schema deploy template-schema.json \
+  --account 16621930 --name "example.com.au - GA4" \
+  --url "https://www.example.com.au"
 
 # Apply schema to existing property (skips duplicates)
-ga4 --profile roam schema deploy roam-schema.json --property 461067940
+ga4 --profile client1 schema deploy template-schema.json --property 461067940
 ```
 
 ### Health Checks & Scanning

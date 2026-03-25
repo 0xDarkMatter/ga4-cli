@@ -1,13 +1,14 @@
 # GA4-CLI
 
-> Google Analytics 4 property management, health diagnostics, schema replication, and reporting CLI
+A command-line tool for managing Google Analytics 4 properties at scale. Built for agencies and teams that manage multiple GA4 accounts across different clients.
 
-A [Clique Protocol](../00_Fabric/docs/CLIQUE_PROTOCOL.md) tool for managing GA4 properties at scale. Supports multi-profile OAuth authentication, 25-check health diagnostics, schema export/deploy for property replication, custom channel groups, and user access management across accounts and properties.
+Run health diagnostics across every property in an account. Export a template property's schema — custom dimensions, key events, channel groups, enhanced measurement — and deploy it to new sites in one command. Manage user access at both account and property level, with bulk operations for onboarding and migrations.
+
+Supports multi-profile OAuth so you can switch between Google accounts without re-authenticating. Every command outputs structured JSON for scripting and automation.
 
 ## Installation
 
 ```bash
-cd X:\Fabric\GA4
 uv pip install -e .
 ```
 
@@ -16,23 +17,23 @@ uv pip install -e .
 ```bash
 # Authenticate
 ga4 auth login
-ga4 auth login --profile roam       # Named profile for another Google account
+ga4 auth login --profile client1       # Named profile for another Google account
 
 # Explore
 ga4 accounts list
 ga4 properties list --json
-ga4 --profile roam properties list --account 16621930
+ga4 --profile client1 properties list --account 987654321
 
 # Health check a property
-ga4 health check 309144142
-ga4 health report 309144142 -o reports/
+ga4 health check 123456789
+ga4 health report 123456789 -o reports/
 
 # Manage users
-ga4 users list 309144142
-ga4 users add 309144142 user@example.com --role analyst
+ga4 users list 123456789
+ga4 users add 123456789 user@example.com --role analyst
 
 # Run reports
-ga4 reports run 309144142 -d date,city -m activeUsers,sessions
+ga4 reports run 123456789 -d date,city -m activeUsers,sessions
 ```
 
 ## Global Flags
@@ -172,49 +173,49 @@ Scoring: 0-100. Grades: A (≥90), B (≥75), C (≥60), D (≥40), F (<40).
 
 ```bash
 # Export template property
-ga4 --profile roam schema export 309144142 -o roam-schema.json
+ga4 --profile client1 schema export 123456789 -o template-schema.json
 
 # Preview
-ga4 --profile roam schema deploy roam-schema.json \
-  --account 16621930 --name "newsite.com.au - GA4" \
-  --url "https://www.newsite.com.au" --dry-run
+ga4 --profile client1 schema deploy template-schema.json \
+  --account 987654321 --name "example.com.au - GA4" \
+  --url "https://www.example.com.au" --dry-run
 
 # Deploy
-ga4 --profile roam schema deploy roam-schema.json \
-  --account 16621930 --name "newsite.com.au - GA4" \
-  --url "https://www.newsite.com.au"
+ga4 --profile client1 schema deploy template-schema.json \
+  --account 987654321 --name "example.com.au - GA4" \
+  --url "https://www.example.com.au"
 
 # Apply to existing property (skips duplicates)
-ga4 --profile roam schema deploy roam-schema.json --property 461067940
+ga4 --profile client1 schema deploy template-schema.json --property 111222333
 ```
 
 ### Multi-Account User Management
 
 ```bash
 # Property-level
-ga4 users add 309144142 user@example.com --role analyst
-ga4 users remove 309144142 user@example.com
+ga4 users add 123456789 user@example.com --role analyst
+ga4 users remove 123456789 user@example.com
 
 # Account-level (cascades to all properties)
-ga4 users add --account 16621930 user@example.com --role admin
-ga4 users list --account 16621930 --json
+ga4 users add --account 987654321 user@example.com --role admin
+ga4 users list --account 987654321 --json
 
 # Bulk from file
-ga4 users batch-add 309144142 users.json --dry-run
-ga4 users copy 309144142 987654321 --dry-run
+ga4 users batch-add 123456789 users.json --dry-run
+ga4 users copy 123456789 987654321 --dry-run
 ```
 
 ### Health & Scanning
 
 ```bash
 # Single property
-ga4 health check 309144142
-ga4 health report 309144142 --spider 0   # skip spider
+ga4 health check 123456789
+ga4 health report 123456789 --spider 0   # skip spider
 
 # All properties in an account
-ga4 scan all --account 16621930
-ga4 scan issues --account 16621930
-ga4 scan permissions --account 16621930 --json
+ga4 scan all --account 987654321
+ga4 scan issues --account 987654321
+ga4 scan permissions --account 987654321 --json
 ```
 
 ### JSON Pipeline Examples
@@ -224,13 +225,13 @@ ga4 scan permissions --account 16621930 --json
 ga4 properties list --json | jq -r '.data[].id'
 
 # Get health score
-ga4 health check 309144142 --json | jq '.data.score'
+ga4 health check 123456789 --json | jq '.data.score'
 
 # Filter output fields
 ga4 --fields id,name properties list --json
 
 # Quiet mode for scripts
-ga4 -q health summary 309144142 --json
+ga4 -q health summary 123456789 --json
 ```
 
 ## Exit Codes
@@ -296,4 +297,4 @@ ga4 -q health summary 309144142 --json
 
 ## Protocol
 
-This tool follows the [Clique Protocol](../00_Fabric/docs/CLIQUE_PROTOCOL.md).
+Follows the Clique Protocol for consistent CLI patterns, JSON output, and exit codes.

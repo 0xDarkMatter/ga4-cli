@@ -23,10 +23,10 @@ This means:
 
 ```bash
 # Preview what will be created (dry run)
-ga4 channels create 309144142 --template ai-traffic --dry-run
+ga4 channels create 123456789 --template ai-traffic --dry-run
 
 # Create (matches all Referral traffic via API)
-ga4 channels create 309144142 --template ai-traffic
+ga4 channels create 123456789 --template ai-traffic
 
 # Then edit in GA4 UI to apply source-level regex for AI-only filtering
 ```
@@ -109,14 +109,14 @@ Channel groups are included in schema export/deploy:
 
 ```bash
 # Export property schema (includes custom channel groups)
-ga4 schema export 309144142 -o roam-schema.json
+ga4 schema export 123456789 -o template-schema.json
 
 # Deploy to new property (creates channel groups)
-ga4 schema deploy roam-schema.json --account 16621930 \
-  --name "newsite.com.au - GA4" --url "https://www.newsite.com.au"
+ga4 schema deploy template-schema.json --account 987654321 \
+  --name "example.com.au - GA4" --url "https://www.example.com.au"
 
 # Deploy to existing property (skips if group name already exists)
-ga4 schema deploy roam-schema.json --property 461067940
+ga4 schema deploy template-schema.json --property 111222333
 ```
 
 ## Updating the Regex
@@ -125,12 +125,12 @@ After editing the channel group in the GA4 UI to use source-level filtering:
 
 ```bash
 # Export current channel group
-ga4 channels export 309144142 <group-id> -o ai-traffic.json
+ga4 channels export 123456789 <group-id> -o ai-traffic.json
 
 # Edit ai-traffic.json to add new domains to the regex
 
 # Update the channel group
-ga4 channels update 309144142 <group-id> --from-file ai-traffic.json
+ga4 channels update 123456789 <group-id> --from-file ai-traffic.json
 ```
 
 ## Health Check
