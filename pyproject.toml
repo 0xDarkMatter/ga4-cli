@@ -1,7 +1,7 @@
 [project]
 name = "ga4-cli"
-version = "0.1.0"
-description = "Google Analytics 4 reporting and data analysis"
+version = "0.2.0"
+description = "Google Analytics 4 property management, health diagnostics, schema replication, and reporting"
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [
