@@ -5,7 +5,7 @@
 ## Installation
 
 ```bash
-cd X:\Fabric\GA4
+cd X:\Clique\GA4
 uv pip install -e .
 ```
 
@@ -54,12 +54,17 @@ Global flag `--profile NAME` (or env `GA4_PROFILE`) selects the auth profile for
 | Command | Description |
 |---------|-------------|
 | `ga4 users list <property-id> [--json]` | List users with access |
+| `ga4 users list --account <account-id> [--json]` | List account-level users |
 | `ga4 users add <property-id> <email> --role <role> [--dry-run]` | Add user access |
+| `ga4 users add --account <account-id> <email> --role <role>` | Add account-level access |
 | `ga4 users remove <property-id> <email> [--dry-run]` | Remove user access |
-| `ga4 users copy <src> <dest> [--dry-run]` | Copy users between properties |
-| `ga4 users batch-add <property-id> <file> [--dry-run]` | Add users from JSON/CSV |
+| `ga4 users remove --account <account-id> <email>` | Remove account-level access |
+| `ga4 users copy <src> <dest> [--account] [--dry-run]` | Copy users between properties/accounts |
+| `ga4 users batch-add <id> <file> [--account] [--dry-run]` | Add users from JSON/CSV |
 
 **Roles:** `viewer`, `analyst`, `editor`, `admin`
+
+**Scoping:** All user commands support property-level (default) and account-level (`--account`/`-a`). Account-level access cascades to all properties under the account.
 
 ### Reports
 
@@ -83,7 +88,7 @@ Global flag `--profile NAME` (or env `GA4_PROFILE`) selects the auth profile for
 
 | Command | Description |
 |---------|-------------|
-| `ga4 health check <property-id> [--json] [--no-cache]` | Full 24-check diagnostic |
+| `ga4 health check <property-id> [--json] [--no-cache]` | Full 25-check diagnostic |
 | `ga4 health access <property-id> [--json]` | Access audit only |
 | `ga4 health tracking <property-id> [--json]` | Tracking & data quality only |
 | `ga4 health summary <property-id> [--json]` | Quick one-line score |
@@ -108,7 +113,24 @@ Global flag `--profile NAME` (or env `GA4_PROFILE`) selects the auth profile for
 
 Both commands support `--dry-run` and `--json`.
 
-**Exported schema includes:** custom dimensions, custom metrics, key events, enhanced measurement settings, data retention, audiences.
+**Exported schema includes:** custom dimensions, custom metrics, key events, channel groups, enhanced measurement settings, data retention, audiences.
+
+### Channels (Channel Groups)
+
+| Command | Description |
+|---------|-------------|
+| `ga4 channels list <property-id> [--json]` | List channel groups |
+| `ga4 channels get <property-id> <group-id> [--json]` | Get channel group details |
+| `ga4 channels create <property-id> --template <name> [--dry-run]` | Create from template |
+| `ga4 channels create <property-id> --from-file <file> [--dry-run]` | Create from JSON file |
+| `ga4 channels update <property-id> <group-id> [--template/--from-file]` | Update existing group |
+| `ga4 channels export <property-id> <group-id> -o <file>` | Export group to JSON file |
+| `ga4 channels delete <property-id> <group-id> [--dry-run]` | Delete custom group |
+| `ga4 channels templates [--json]` | List available templates |
+
+**Templates:** `ai-traffic` — Clones the default channel group and inserts "AI Traffic" above Referral. Via API, matches all Referral traffic (API limitation: only `eachScopeDefaultChannelGroup` is supported). Edit in GA4 UI to apply source-level AI domain regex. See `docs/AI_TRAFFIC_CHANNELS.md`.
+
+Standard properties support max 2 custom channel groups.
 
 ### Cache
 
@@ -123,12 +145,12 @@ Both commands support `--dry-run` and `--json`.
 |---------|-------------|
 | `ga4 describe [--json]` | List all resources and actions |
 
-## Health Checks (24 checks)
+## Health Checks (25 checks)
 
 | Category | Checks |
 |----------|--------|
 | **Tracking** | Data recency, realtime, session volume, (not set), bounce rate, engagement, traffic trend, event diversity |
-| **Config** | Property config, data streams, key events, custom dims/metrics, enhanced measurement, audiences, ads links, data retention |
+| **Config** | Property config, data streams, key events, custom dims/metrics, enhanced measurement, audiences, ads links, data retention, channel groups |
 | **Access** | User count, admin count, external domains, role distribution |
 | **Tags** | Double-tagging, self-referrals, hostname fragmentation, channel grouping |
 
@@ -170,4 +192,4 @@ ga4 --profile roam schema deploy roam-schema.json --property 461067940
 
 ## Protocol
 
-This tool follows the [Fabric Protocol](../00_Fabric/docs/FABRIC_PROTOCOL.md).
+This tool follows the [Clique Protocol](../00_Fabric/docs/CLIQUE_PROTOCOL.md).

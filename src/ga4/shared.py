@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 
 import typer
 from rich.console import Console
@@ -31,6 +32,8 @@ EXIT_CONFLICT = 7
 # sets this on every invocation via set_active_profile().  Defaults to the
 # GA4_PROFILE env var, falling back to DEFAULT_PROFILE.
 _active_profile: str = os.environ.get("GA4_PROFILE", DEFAULT_PROFILE)
+_active_fields: str | None = None
+_quiet_mode: bool = False
 
 
 def get_active_profile() -> str:
@@ -39,12 +42,31 @@ def get_active_profile() -> str:
 
 
 def set_active_profile(profile: str) -> None:
-    """Set the active authentication profile.
-
-    Called from the CLI callback before any sub-command executes.
-    """
+    """Set the active authentication profile."""
     global _active_profile
     _active_profile = profile
+
+
+def get_active_fields() -> str | None:
+    """Return the active --fields filter."""
+    return _active_fields
+
+
+def set_active_fields(fields: str | None) -> None:
+    """Set the active --fields filter from the CLI callback."""
+    global _active_fields
+    _active_fields = fields
+
+
+def is_quiet() -> bool:
+    """Return whether quiet mode is active."""
+    return _quiet_mode
+
+
+def set_quiet(quiet: bool) -> None:
+    """Set quiet mode from the CLI callback."""
+    global _quiet_mode
+    _quiet_mode = quiet
 
 
 # ---------------------------------------------------------------------------
@@ -52,8 +74,17 @@ def set_active_profile(profile: str) -> None:
 # ---------------------------------------------------------------------------
 
 
+def info(message: str) -> None:
+    """Print informational message to stderr, suppressed by --quiet."""
+    if not _quiet_mode:
+        console.print(message)
+
+
 def output_json(data) -> None:
-    """Output JSON to stdout."""
+    """Output JSON to stdout, applying --fields filtering if active."""
+    fields = get_active_fields()
+    if fields and isinstance(data, dict) and "data" in data:
+        data = {**data, "data": filter_fields(data["data"], fields)}
     print(json.dumps(data, indent=2, default=str))
 
 
@@ -90,6 +121,39 @@ def require_auth(as_json: bool = False):
             EXIT_AUTH_REQUIRED,
             as_json=as_json,
         )
+
+
+def filter_fields(data, fields: str | None):
+    """Filter JSON output to only include specified fields.
+
+    Per Clique Protocol --fields specification. Applies to objects inside data.
+    """
+    if not fields:
+        return data
+    keep = {f.strip() for f in fields.split(",")}
+    if isinstance(data, list):
+        return [{k: v for k, v in item.items() if k in keep} for item in data]
+    if isinstance(data, dict):
+        return {k: v for k, v in data.items() if k in keep}
+    return data
+
+
+def validate_id(value: str, field_name: str = "ID", as_json: bool = False) -> str:
+    """Reject IDs with suspicious characters (agent hallucination defence).
+
+    GA4 property and account IDs are numeric strings. This rejects path
+    traversal, query injection, and other suspicious patterns.
+    """
+    if not value:
+        error(f"Missing {field_name}", "VALIDATION_ERROR", EXIT_VALIDATION, as_json=as_json)
+    if re.search(r'[?#%&]|\.\.', value):
+        error(
+            f"Invalid {field_name}: contains prohibited characters",
+            "VALIDATION_ERROR", EXIT_VALIDATION,
+            {"field": field_name, "value": value}, as_json,
+        )
+    # GA4 IDs are numeric — warn but don't block non-numeric (some resource IDs aren't)
+    return value
 
 
 def handle_api_error(e: Exception, context: str, as_json: bool = False):

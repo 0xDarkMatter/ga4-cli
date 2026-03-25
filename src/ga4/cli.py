@@ -23,6 +23,7 @@ from .config import (
 )
 from .health_cli import health_app
 from .scan_cli import scan_app
+from .channels_cli import channels_app
 from .schema_cli import schema_app
 from .shared import (
     EXIT_AUTH_REQUIRED,
@@ -35,11 +36,16 @@ from .shared import (
     EXIT_VALIDATION,
     console,
     error as _error,
+    filter_fields,
     get_active_profile,
     handle_api_error,
+    is_quiet,
     output_json as _output_json,
     require_auth as _require_auth,
+    set_active_fields,
     set_active_profile,
+    set_quiet,
+    validate_id,
 )
 
 
@@ -71,15 +77,26 @@ def main(
             show_default=True,
         ),
     ] = os.environ.get("GA4_PROFILE", DEFAULT_PROFILE),
+    fields: Annotated[
+        Optional[str],
+        typer.Option("--fields", help="Comma-separated fields to include in JSON output"),
+    ] = None,
+    quiet: Annotated[
+        bool,
+        typer.Option("--quiet", "-q", help="Suppress non-essential stderr output"),
+    ] = False,
 ) -> None:
     """Google Analytics 4 reporting and data analysis"""
     set_active_profile(profile)
+    set_active_fields(fields)
+    set_quiet(quiet)
 
 
 # Register health and scan sub-apps
 app.add_typer(health_app, name="health")
 app.add_typer(scan_app, name="scan")
 app.add_typer(schema_app, name="schema")
+app.add_typer(channels_app, name="channels")
 
 
 # =============================================================================
@@ -105,9 +122,11 @@ def describe(
         "reports": ["run", "realtime"],
         "dimensions": ["list", "get"],
         "metrics": ["list", "get"],
-        "users": ["list", "add", "remove", "copy", "batch-add"],
-        "health": ["check", "access", "tracking", "summary"],
-        "scan": ["all", "access", "issues"],
+        "users": ["list", "add", "remove", "copy", "batch-add"],  # all support --account for account-level
+        "health": ["check", "access", "tracking", "summary", "report"],
+        "scan": ["all", "issues", "report", "permissions"],
+        "schema": ["export", "deploy"],
+        "channels": ["list", "get", "create", "update", "export", "delete", "templates"],
     }
 
     if json_output:
@@ -475,6 +494,7 @@ def properties_get(
         ga4 properties get 123456789
         ga4 properties get 123456789 --json
     """
+    validate_id(property_id, "property_id", json_output)
     _require_auth(json_output)
 
     from .admin_client import AdminClient
@@ -857,38 +877,55 @@ app.add_typer(users_app, name="users")
 
 @users_app.command("list")
 def users_list(
-    property_id: Annotated[str, typer.Argument(help="Property ID")],
+    property_id: Annotated[Optional[str], typer.Argument(help="Property ID")] = None,
+    account: Annotated[Optional[str], typer.Option("--account", "-a", help="Account ID (account-level access)")] = None,
+    limit: Annotated[int, typer.Option("--limit", "-n", help="Max results")] = 200,
     json_output: Annotated[bool, typer.Option("--json", help="Output as JSON")] = False,
 ):
     """
-    List users with access to a property.
+    List users with access to a property or account.
+
+    Account-level access cascades to all properties under the account.
 
     Examples:
         ga4 users list 123456789
+        ga4 users list --account 123456789
         ga4 users list 123456789 --json
     """
     _require_auth(json_output)
 
+    if not property_id and not account:
+        _error("Provide a property ID or --account", "VALIDATION_ERROR", EXIT_VALIDATION, as_json=json_output)
+    if property_id and account:
+        _error("Provide either a property ID or --account, not both", "VALIDATION_ERROR", EXIT_VALIDATION, as_json=json_output)
+
     from .admin_client import AdminClient
 
     client = AdminClient(profile=get_active_profile())
+
+    scope_type = "account" if account else "property"
+    scope_id = account or property_id
+
     try:
-        users = client.list_access_bindings(property_id)
+        if account:
+            users = client.list_account_access_bindings(account)
+        else:
+            users = client.list_access_bindings(property_id, limit=limit)
     except Exception as e:
         _error(f"Failed to list users: {e}", "API_ERROR", EXIT_ERROR, as_json=json_output)
 
+    users = users[:limit]
+
     if json_output:
-        _output_json({
-            "data": users,
-            "meta": {"count": len(users), "property_id": property_id},
-        })
+        meta = {"count": len(users), f"{scope_type}_id": scope_id}
+        _output_json({"data": users, "meta": meta})
         return
 
     if not users:
-        console.print(f"[yellow]No users found for property {property_id}[/yellow]")
+        console.print(f"[yellow]No users found for {scope_type} {scope_id}[/yellow]")
         return
 
-    table = Table(title=f"Users for Property {property_id}")
+    table = Table(title=f"Users for {scope_type.title()} {scope_id}")
     table.add_column("Email")
     table.add_column("Role(s)")
 
@@ -900,23 +937,41 @@ def users_list(
 
 @users_app.command("add")
 def users_add(
-    property_id: Annotated[str, typer.Argument(help="Property ID")],
-    email: Annotated[str, typer.Argument(help="User email address")],
+    property_id: Annotated[Optional[str], typer.Argument(help="Property ID")] = None,
+    email: Annotated[Optional[str], typer.Argument(help="User email address")] = None,
+    account: Annotated[Optional[str], typer.Option("--account", "-a", help="Account ID (account-level access)")] = None,
     role: Annotated[str, typer.Option("--role", "-r", help="Role: viewer, analyst, editor, admin")] = "analyst",
     dry_run: Annotated[bool, typer.Option("--dry-run", help="Preview without making changes")] = False,
     json_output: Annotated[bool, typer.Option("--json", help="Output as JSON")] = False,
 ):
     """
-    Add a user to a property with specified role.
+    Add a user to a property or account with specified role.
+
+    Account-level access cascades to all properties under the account.
 
     Examples:
         ga4 users add 123456789 user@example.com --role analyst
-        ga4 users add 123456789 user@example.com -r viewer --json
+        ga4 users add --account 123456789 user@example.com --role admin
         ga4 users add 123456789 user@example.com --role viewer --dry-run
     """
     _require_auth(json_output)
 
+    # When --account is used, property_id positional slot holds the email
+    if account and property_id and not email:
+        email = property_id
+        property_id = None
+
+    if not email:
+        _error("Email address is required", "VALIDATION_ERROR", EXIT_VALIDATION, as_json=json_output)
+    if not property_id and not account:
+        _error("Provide a property ID or --account", "VALIDATION_ERROR", EXIT_VALIDATION, as_json=json_output)
+    if property_id and account:
+        _error("Provide either a property ID or --account, not both", "VALIDATION_ERROR", EXIT_VALIDATION, as_json=json_output)
+
     from .admin_client import AdminClient, ROLES
+
+    scope_type = "account" if account else "property"
+    scope_id = account or property_id
 
     # Validate role
     if role.lower() not in ROLES:
@@ -932,8 +987,9 @@ def users_add(
         result = {
             "dry_run": True,
             "action": "create_access_binding",
+            "scope": scope_type,
             "would_send": {
-                "property_id": property_id,
+                f"{scope_type}_id": scope_id,
                 "email": email,
                 "role": role.lower(),
             },
@@ -941,12 +997,15 @@ def users_add(
         if json_output:
             _output_json({"data": result})
         else:
-            console.print(f"[cyan]Would add {email} as {role} to property {property_id}[/cyan]")
+            console.print(f"[cyan]Would add {email} as {role} to {scope_type} {scope_id}[/cyan]")
         return
 
     client = AdminClient(profile=get_active_profile())
     try:
-        binding = client.create_access_binding(property_id, email, role)
+        if account:
+            binding = client.create_account_access_binding(account, email, role)
+        else:
+            binding = client.create_access_binding(property_id, email, role)
     except ValueError as e:
         _error(str(e), "VALIDATION_ERROR", EXIT_VALIDATION, as_json=json_output)
     except Exception as e:
@@ -955,37 +1014,55 @@ def users_add(
     if json_output:
         _output_json({
             "data": binding,
-            "meta": {"action": "created"},
+            "meta": {"action": "created", "scope": scope_type},
         })
         return
 
-    console.print(f"[green]Added {email} as {role} to property {property_id}[/green]")
+    console.print(f"[green]Added {email} as {role} to {scope_type} {scope_id}[/green]")
 
 
 @users_app.command("remove")
 def users_remove(
-    property_id: Annotated[str, typer.Argument(help="Property ID")],
-    email: Annotated[str, typer.Argument(help="User email address")],
+    property_id: Annotated[Optional[str], typer.Argument(help="Property ID")] = None,
+    email: Annotated[Optional[str], typer.Argument(help="User email address")] = None,
+    account: Annotated[Optional[str], typer.Option("--account", "-a", help="Account ID (account-level access)")] = None,
     dry_run: Annotated[bool, typer.Option("--dry-run", help="Preview without making changes")] = False,
     json_output: Annotated[bool, typer.Option("--json", help="Output as JSON")] = False,
 ):
     """
-    Remove a user's access from a property.
+    Remove a user's access from a property or account.
 
     Examples:
         ga4 users remove 123456789 user@example.com
-        ga4 users remove 123456789 user@example.com --json
+        ga4 users remove --account 123456789 user@example.com
         ga4 users remove 123456789 user@example.com --dry-run
     """
     _require_auth(json_output)
 
+    # When --account is used, property_id positional slot holds the email
+    if account and property_id and not email:
+        email = property_id
+        property_id = None
+
+    if not email:
+        _error("Email address is required", "VALIDATION_ERROR", EXIT_VALIDATION, as_json=json_output)
+    if not property_id and not account:
+        _error("Provide a property ID or --account", "VALIDATION_ERROR", EXIT_VALIDATION, as_json=json_output)
+    if property_id and account:
+        _error("Provide either a property ID or --account, not both", "VALIDATION_ERROR", EXIT_VALIDATION, as_json=json_output)
+
     from .admin_client import AdminClient
 
+    scope_type = "account" if account else "property"
+    scope_id = account or property_id
+
     if dry_run:
-        # Look up the binding to confirm it exists
         client = AdminClient(profile=get_active_profile())
         try:
-            bindings = client.list_access_bindings(property_id)
+            if account:
+                bindings = client.list_account_access_bindings(account)
+            else:
+                bindings = client.list_access_bindings(property_id)
             binding = next((b for b in bindings if b["user"] == email), None)
         except Exception as e:
             _error(f"Failed to look up user: {e}", "API_ERROR", EXIT_ERROR, as_json=json_output)
@@ -996,9 +1073,10 @@ def users_remove(
         result = {
             "dry_run": True,
             "action": "delete_access_binding",
+            "scope": scope_type,
             "would_remove": {
                 "email": email,
-                "property_id": property_id,
+                f"{scope_type}_id": scope_id,
                 "roles": binding.get("roles", []),
             },
         }
@@ -1006,12 +1084,15 @@ def users_remove(
             _output_json({"data": result})
         else:
             roles = ", ".join(binding.get("roles", []))
-            console.print(f"[cyan]Would remove {email} ({roles}) from property {property_id}[/cyan]")
+            console.print(f"[cyan]Would remove {email} ({roles}) from {scope_type} {scope_id}[/cyan]")
         return
 
     client = AdminClient(profile=get_active_profile())
     try:
-        client.delete_access_binding(property_id, email)
+        if account:
+            client.delete_account_access_binding(account, email)
+        else:
+            client.delete_access_binding(property_id, email)
     except ValueError as e:
         _error(str(e), "NOT_FOUND", EXIT_NOT_FOUND, {"email": email}, json_output)
     except Exception as e:
@@ -1019,37 +1100,40 @@ def users_remove(
 
     if json_output:
         _output_json({
-            "data": {"email": email, "property_id": property_id},
-            "meta": {"action": "deleted"},
+            "data": {"email": email, f"{scope_type}_id": scope_id},
+            "meta": {"action": "deleted", "scope": scope_type},
         })
         return
 
-    console.print(f"[green]Removed {email} from property {property_id}[/green]")
+    console.print(f"[green]Removed {email} from {scope_type} {scope_id}[/green]")
 
 
 @users_app.command("copy")
 def users_copy(
-    source_property: Annotated[str, typer.Argument(help="Source property ID")],
-    dest_property: Annotated[str, typer.Argument(help="Destination property ID")],
+    source: Annotated[str, typer.Argument(help="Source property or account ID")],
+    dest: Annotated[str, typer.Argument(help="Destination property or account ID")],
+    account: Annotated[bool, typer.Option("--account", "-a", help="Treat IDs as account IDs")] = False,
     role: Annotated[Optional[str], typer.Option("--role", "-r", help="Filter by role")] = None,
     exclude: Annotated[Optional[str], typer.Option("--exclude", "-x", help="Emails to exclude (comma-separated)")] = None,
     dry_run: Annotated[bool, typer.Option("--dry-run", help="Preview without making changes")] = False,
     json_output: Annotated[bool, typer.Option("--json", help="Output as JSON")] = False,
 ):
     """
-    Copy users from one property to another.
+    Copy users from one property/account to another.
 
     Useful for migrating Looker Studio reports between orgs.
 
     Examples:
         ga4 users copy 123456789 987654321
+        ga4 users copy --account 123456789 987654321
         ga4 users copy 123456789 987654321 --role analyst
         ga4 users copy 123456789 987654321 --dry-run
-        ga4 users copy 123456789 987654321 --exclude admin@example.com,owner@example.com
     """
     _require_auth(json_output)
 
     from .admin_client import AdminClient, ROLES
+
+    scope_type = "account" if account else "property"
 
     # Validate role filter if provided
     if role and role.lower() not in ROLES:
@@ -1062,17 +1146,20 @@ def users_copy(
 
     client = AdminClient(profile=get_active_profile())
 
-    # Get users from source property
+    # Get users from source
     try:
-        source_users = client.list_access_bindings(source_property)
+        if account:
+            source_users = client.list_account_access_bindings(source)
+        else:
+            source_users = client.list_access_bindings(source)
     except Exception as e:
         _error(f"Failed to list users from source: {e}", "API_ERROR", EXIT_ERROR, as_json=json_output)
 
     if not source_users:
         if json_output:
-            _output_json({"data": [], "meta": {"message": "No users found in source property"}})
+            _output_json({"data": [], "meta": {"message": f"No users found in source {scope_type}"}})
         else:
-            console.print(f"[yellow]No users found in property {source_property}[/yellow]")
+            console.print(f"[yellow]No users found in {scope_type} {source}[/yellow]")
         return
 
     # Parse exclusions
@@ -1086,15 +1173,12 @@ def users_copy(
         email = user.get("user", "")
         user_roles = user.get("roles", [])
 
-        # Skip excluded emails
         if email.lower() in excluded_emails:
             continue
 
-        # Filter by role if specified
         if role and role.lower() not in [r.lower() for r in user_roles]:
             continue
 
-        # Use highest role from source
         copy_role = user_roles[0] if user_roles else "viewer"
         users_to_copy.append({"email": email, "role": copy_role})
 
@@ -1105,20 +1189,20 @@ def users_copy(
             console.print("[yellow]No users match the specified criteria[/yellow]")
         return
 
-    # Dry run - just show what would be copied
     if dry_run:
         if json_output:
             _output_json({
                 "data": users_to_copy,
                 "meta": {
                     "action": "dry_run",
-                    "source_property": source_property,
-                    "dest_property": dest_property,
+                    "scope": scope_type,
+                    f"source_{scope_type}": source,
+                    f"dest_{scope_type}": dest,
                     "count": len(users_to_copy),
                 },
             })
         else:
-            console.print(f"[cyan]Would copy {len(users_to_copy)} users from {source_property} to {dest_property}:[/cyan]")
+            console.print(f"[cyan]Would copy {len(users_to_copy)} users from {scope_type} {source} to {dest}:[/cyan]")
             table = Table()
             table.add_column("Email")
             table.add_column("Role")
@@ -1129,7 +1213,10 @@ def users_copy(
 
     # Execute copy
     try:
-        created = client.batch_create_access_bindings(dest_property, users_to_copy)
+        if account:
+            created = client.batch_create_account_access_bindings(dest, users_to_copy)
+        else:
+            created = client.batch_create_access_bindings(dest, users_to_copy)
     except Exception as e:
         _error(f"Failed to copy users: {e}", "API_ERROR", EXIT_ERROR, as_json=json_output)
 
@@ -1138,19 +1225,21 @@ def users_copy(
             "data": created,
             "meta": {
                 "action": "copied",
-                "source_property": source_property,
-                "dest_property": dest_property,
+                "scope": scope_type,
+                f"source_{scope_type}": source,
+                f"dest_{scope_type}": dest,
                 "count": len(created),
             },
         })
     else:
-        console.print(f"[green]Copied {len(created)} users from {source_property} to {dest_property}[/green]")
+        console.print(f"[green]Copied {len(created)} users from {scope_type} {source} to {dest}[/green]")
 
 
 @users_app.command("batch-add")
 def users_batch_add(
-    property_id: Annotated[str, typer.Argument(help="Property ID")],
+    target_id: Annotated[str, typer.Argument(help="Property or account ID")],
     file_path: Annotated[Path, typer.Argument(help="JSON or CSV file with users")],
+    account: Annotated[bool, typer.Option("--account", "-a", help="Treat ID as account ID")] = False,
     dry_run: Annotated[bool, typer.Option("--dry-run", help="Preview without making changes")] = False,
     json_output: Annotated[bool, typer.Option("--json", help="Output as JSON")] = False,
 ):
@@ -1166,11 +1255,14 @@ def users_batch_add(
 
     Examples:
         ga4 users batch-add 123456789 users.json
+        ga4 users batch-add --account 123456789 users.json
         ga4 users batch-add 123456789 users.csv --dry-run
     """
     _require_auth(json_output)
 
     from .admin_client import AdminClient, ROLES
+
+    scope_type = "account" if account else "property"
 
     if not file_path.exists():
         _error(f"File not found: {file_path}", "NOT_FOUND", EXIT_NOT_FOUND, as_json=json_output)
@@ -1214,15 +1306,14 @@ def users_batch_add(
             as_json=json_output,
         )
 
-    # Dry run
     if dry_run:
         if json_output:
             _output_json({
                 "data": users,
-                "meta": {"action": "dry_run", "property_id": property_id, "count": len(users)},
+                "meta": {"action": "dry_run", "scope": scope_type, f"{scope_type}_id": target_id, "count": len(users)},
             })
         else:
-            console.print(f"[cyan]Would add {len(users)} users to property {property_id}:[/cyan]")
+            console.print(f"[cyan]Would add {len(users)} users to {scope_type} {target_id}:[/cyan]")
             table = Table()
             table.add_column("Email")
             table.add_column("Role")
@@ -1231,20 +1322,22 @@ def users_batch_add(
             console.print(table)
         return
 
-    # Execute batch add
     client = AdminClient(profile=get_active_profile())
     try:
-        created = client.batch_create_access_bindings(property_id, users)
+        if account:
+            created = client.batch_create_account_access_bindings(target_id, users)
+        else:
+            created = client.batch_create_access_bindings(target_id, users)
     except Exception as e:
         _error(f"Failed to add users: {e}", "API_ERROR", EXIT_ERROR, as_json=json_output)
 
     if json_output:
         _output_json({
             "data": created,
-            "meta": {"action": "created", "property_id": property_id, "count": len(created)},
+            "meta": {"action": "created", "scope": scope_type, f"{scope_type}_id": target_id, "count": len(created)},
         })
     else:
-        console.print(f"[green]Added {len(created)} users to property {property_id}[/green]")
+        console.print(f"[green]Added {len(created)} users to {scope_type} {target_id}[/green]")
 
 
 if __name__ == "__main__":

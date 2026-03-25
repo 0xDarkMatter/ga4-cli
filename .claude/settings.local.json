@@ -2,7 +2,18 @@
   "permissions": {
     "allow": [
       "Bash(copier copy:*)",
-      "Bash(.venv/Scripts/ga4.exe:*)"
+      "Bash(.venv/Scripts/ga4.exe:*)",
+      "Bash(ga4 --help:*)",
+      "Bash(ga4:*)",
+      "Bash(dir:*)",
+      "Bash(.venv/Scripts/python:*)",
+      "Bash(.venv/Scripts/ga4:*)",
+      "Bash(mkdir:*)",
+      "Bash(rm:*)",
+      "Bash(python:*)",
+      "Bash(cp:*)",
+      "Bash(netstat:*)",
+      "Bash(curl:*)"
     ]
   }
 }
