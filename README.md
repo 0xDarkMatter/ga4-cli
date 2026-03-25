@@ -1,5 +1,9 @@
 # GA4-CLI
 
+[![Version](https://img.shields.io/badge/version-0.2.0-blue)](https://github.com/0xDarkMatter/ga4-cli/releases)
+[![Python](https://img.shields.io/badge/python-3.11+-green)](https://python.org)
+[![License](https://img.shields.io/badge/license-MIT-lightgrey)](LICENSE)
+
 A command-line tool for managing Google Analytics 4 properties at scale. Built for agencies and teams that manage multiple GA4 accounts across different clients.
 
 Run health diagnostics across every property in an account. Export a template property's schema — custom dimensions, key events, channel groups, enhanced measurement — and deploy it to new sites in one command. Manage user access at both account and property level, with bulk operations for onboarding and migrations.
