@@ -1,6 +1,6 @@
 [project]
 name = "ga4-cli"
-version = "0.2.0"
+version = "0.3.0"
 description = "Google Analytics 4 property management, health diagnostics, schema replication, and reporting"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -36,7 +36,7 @@ packages = ["src/ga4"]
 
 [tool.clique]
 description = "Google Analytics 4 property management, health diagnostics, schema replication, and reporting"
-resources = ["accounts", "properties", "reports", "dimensions", "metrics", "users", "health", "scan", "schema", "channels", "cache"]
+resources = ["accounts", "properties", "reports", "dimensions", "metrics", "users", "health", "scan", "schema", "channels", "bq", "cache"]
 auth = "oauth2"
 origin = "clique"
 status = "experimental"

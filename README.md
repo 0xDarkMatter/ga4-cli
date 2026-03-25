@@ -1,6 +1,6 @@
 # GA4-CLI
 
-[![Version](https://img.shields.io/badge/version-0.2.0-blue)](https://github.com/0xDarkMatter/ga4-cli/releases)
+[![Version](https://img.shields.io/badge/version-0.3.0-blue)](https://github.com/0xDarkMatter/ga4-cli/releases)
 [![Python](https://img.shields.io/badge/python-3.11+-green)](https://python.org)
 [![License](https://img.shields.io/badge/license-MIT-lightgrey)](LICENSE)
 
@@ -152,6 +152,49 @@ Export a property's configuration and replicate it to new or existing properties
 
 **Templates:** `ai-traffic` — Clones the default channel group and inserts "AI Traffic" above Referral. Via API, matches all Referral traffic (API only supports `eachScopeDefaultChannelGroup`). Edit in GA4 UI to apply source-level AI domain regex. See [`docs/AI_TRAFFIC_CHANNELS.md`](docs/AI_TRAFFIC_CHANNELS.md).
 
+### BigQuery (GA4 Export)
+
+GA4-specific BigQuery commands that the official `bq` CLI doesn't provide. Understands GA4 export dataset conventions (`analytics_<property_id>`), auto-detects GCP projects from BQ links, and includes pre-built query templates for common GA4 analysis.
+
+**Why not just use `bq`?** The `bq` CLI is a general BigQuery tool — it doesn't know about GA4 properties, export links, or the nested event schema. `ga4 bq` bridges the gap: it cross-references the GA4 Admin API with BigQuery to audit exports, check freshness, and run GA4-specific queries without writing SQL.
+
+| Command | Description |
+|---------|-------------|
+| `ga4 bq status <property-id>` | Show BQ export link config (project, export types, excluded events) |
+| `ga4 bq link <property-id> --project <gcp> [--streaming] [--dry-run]` | Create BQ export link |
+| `ga4 bq freshness <property-id>` | Check latest export table dates and data lag |
+| `ga4 bq audit [--account ID]` | Scan all properties for BQ link status and gaps |
+| `ga4 bq query <property-id> --template <name> [--from --to]` | Run pre-built GA4 query |
+| `ga4 bq query <property-id> --sql "SELECT ..."` | Run custom SQL |
+| `ga4 bq cost <property-id> --template <name>` | Estimate query cost (dry-run) |
+| `ga4 bq tables <property-id> [-n LIMIT]` | List tables in GA4 export dataset |
+| `ga4 bq schema <property-id> [--table NAME]` | Show table schema |
+| `ga4 bq datasets <gcp-project> [--ga4-only]` | List datasets in a GCP project |
+| `ga4 bq templates` | List available query templates |
+
+**Query templates:** `ai-traffic`, `sessions`, `top-pages`, `events`, `channels`
+
+```bash
+# Check if BQ export is set up
+ga4 bq status 123456789
+
+# Audit all properties in an account
+ga4 bq audit --account 987654321
+
+# Check data freshness
+ga4 bq freshness 123456789
+
+# Run AI traffic analysis from BQ
+ga4 bq query 123456789 --template ai-traffic --from 2025-01-01 --to 2025-03-01
+
+# Estimate cost before running
+ga4 bq cost 123456789 --template sessions --from 2025-01-01 --to 2025-12-31
+
+# Browse tables and schema
+ga4 bq tables 123456789
+ga4 bq schema 123456789
+```
+
 ### Cache & Introspection
 
 | Command | Description |
@@ -260,6 +303,22 @@ ga4 -q health summary 123456789 --json
 | Analytics Data v1beta | `analyticsdata.googleapis.com/v1beta` | Reports, dimensions, metrics |
 
 ## Recent Changes
+
+### v0.3.0 (March 2026)
+
+**BigQuery Integration**
+- New `ga4 bq` command group with 10 commands
+- `bq status` — show BQ export link configuration
+- `bq link` — create BQ export links via Admin API
+- `bq freshness` — check data lag on export tables
+- `bq audit` — scan all properties for BQ link gaps
+- `bq query` — run pre-built or custom SQL against GA4 BQ exports
+- `bq cost` — dry-run cost estimation before querying
+- `bq tables` / `bq schema` / `bq datasets` — browse BQ structure
+- 5 query templates: ai-traffic, sessions, top-pages, events, channels
+- Auto-detects GCP project from BQ link (no `--project` needed)
+- BQ REST API client using existing OAuth tokens (no extra deps)
+- 36 automated tests (up from 20)
 
 ### v0.2.0 (March 2026)
 

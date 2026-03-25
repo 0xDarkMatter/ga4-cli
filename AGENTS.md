@@ -113,6 +113,23 @@ Export a property's configuration and replicate it to new or existing properties
 
 **Templates:** `ai-traffic` — clones default group + inserts AI Traffic above Referral. Via API, matches all Referral traffic. Edit in GA4 UI to apply source-level regex. See `docs/AI_TRAFFIC_CHANNELS.md`.
 
+### BigQuery (GA4 Export)
+
+| Command | Description |
+|---------|-------------|
+| `ga4 bq status <property-id>` | Show BQ export link config |
+| `ga4 bq link <property-id> --project <gcp> [--streaming] [--dry-run]` | Create BQ export link |
+| `ga4 bq freshness <property-id>` | Check latest export table dates and lag |
+| `ga4 bq audit [--account ID]` | Scan all properties for BQ link status |
+| `ga4 bq query <property-id> --template <name> [--from --to]` | Run pre-built GA4 query |
+| `ga4 bq cost <property-id> --template <name>` | Dry-run cost estimation |
+| `ga4 bq tables <property-id>` | List tables in GA4 export dataset |
+| `ga4 bq schema <property-id>` | Show table schema |
+| `ga4 bq datasets <gcp-project> [--ga4-only]` | List datasets |
+| `ga4 bq templates` | List query templates |
+
+**Templates:** `ai-traffic`, `sessions`, `top-pages`, `events`, `channels`
+
 ### Cache
 
 | Command | Description |

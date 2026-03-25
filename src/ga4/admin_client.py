@@ -1074,3 +1074,135 @@ class AdminClient:
             }
             for b in all_bindings
         ]
+
+    # --- BigQuery Link Methods ---
+
+    def list_bigquery_links(self, property_id: str) -> list:
+        """List BigQuery links for a property (v1alpha)."""
+        if not property_id.startswith("properties/"):
+            property_id = f"properties/{property_id}"
+
+        all_links = []
+        page_token = None
+
+        while True:
+            params = {"pageSize": 200}
+            if page_token:
+                params["pageToken"] = page_token
+
+            data = self._get_alpha(f"{property_id}/bigQueryLinks", params)
+            all_links.extend(data.get("bigQueryLinks", []))
+
+            page_token = data.get("nextPageToken")
+            if not page_token:
+                break
+
+        return [
+            {
+                "name": link.get("name", ""),
+                "project": link.get("project", ""),
+                "dataset_location": link.get("datasetLocation", ""),
+                "daily_export": link.get("dailyExportEnabled", False),
+                "streaming_export": link.get("streamingExportEnabled", False),
+                "fresh_daily_export": link.get("freshDailyExportEnabled", False),
+                "include_advertising_id": link.get("includeAdvertisingId", False),
+                "export_streams": link.get("exportStreams", []),
+                "excluded_events": link.get("excludedEvents", []),
+                "create_time": link.get("createTime"),
+            }
+            for link in all_links
+        ]
+
+    def get_bigquery_link(self, property_id: str, link_id: str) -> dict:
+        """Get a specific BigQuery link (v1alpha)."""
+        if not property_id.startswith("properties/"):
+            property_id = f"properties/{property_id}"
+
+        data = self._get_alpha(f"{property_id}/bigQueryLinks/{link_id}")
+        return {
+            "name": data.get("name", ""),
+            "project": data.get("project", ""),
+            "dataset_location": data.get("datasetLocation", ""),
+            "daily_export": data.get("dailyExportEnabled", False),
+            "streaming_export": data.get("streamingExportEnabled", False),
+            "fresh_daily_export": data.get("freshDailyExportEnabled", False),
+            "include_advertising_id": data.get("includeAdvertisingId", False),
+            "export_streams": data.get("exportStreams", []),
+            "excluded_events": data.get("excludedEvents", []),
+            "create_time": data.get("createTime"),
+        }
+
+    def create_bigquery_link(
+        self, property_id: str, project: str, dataset_location: str = "US",
+        daily: bool = True, streaming: bool = False, fresh_daily: bool = False,
+        include_advertising_id: bool = False,
+    ) -> dict:
+        """Create a BigQuery link for a property (v1alpha)."""
+        if not property_id.startswith("properties/"):
+            property_id = f"properties/{property_id}"
+
+        body = {
+            "project": project,
+            "datasetLocation": dataset_location,
+            "dailyExportEnabled": daily,
+            "streamingExportEnabled": streaming,
+            "freshDailyExportEnabled": fresh_daily,
+            "includeAdvertisingId": include_advertising_id,
+        }
+
+        data = self._post_alpha(f"{property_id}/bigQueryLinks", body)
+        return {
+            "name": data.get("name", ""),
+            "project": data.get("project", ""),
+            "dataset_location": data.get("datasetLocation", ""),
+            "daily_export": data.get("dailyExportEnabled", False),
+            "streaming_export": data.get("streamingExportEnabled", False),
+            "fresh_daily_export": data.get("freshDailyExportEnabled", False),
+        }
+
+    def update_bigquery_link(
+        self, property_id: str, link_id: str,
+        daily: bool | None = None, streaming: bool | None = None,
+        fresh_daily: bool | None = None,
+        excluded_events: list | None = None,
+    ) -> dict:
+        """Update a BigQuery link (v1alpha)."""
+        if not property_id.startswith("properties/"):
+            property_id = f"properties/{property_id}"
+
+        body = {}
+        update_fields = []
+
+        if daily is not None:
+            body["dailyExportEnabled"] = daily
+            update_fields.append("dailyExportEnabled")
+        if streaming is not None:
+            body["streamingExportEnabled"] = streaming
+            update_fields.append("streamingExportEnabled")
+        if fresh_daily is not None:
+            body["freshDailyExportEnabled"] = fresh_daily
+            update_fields.append("freshDailyExportEnabled")
+        if excluded_events is not None:
+            body["excludedEvents"] = excluded_events
+            update_fields.append("excludedEvents")
+
+        data = self._patch_alpha(
+            f"{property_id}/bigQueryLinks/{link_id}",
+            body,
+            params={"updateMask": ",".join(update_fields)},
+        )
+        return {
+            "name": data.get("name", ""),
+            "project": data.get("project", ""),
+            "daily_export": data.get("dailyExportEnabled", False),
+            "streaming_export": data.get("streamingExportEnabled", False),
+            "fresh_daily_export": data.get("freshDailyExportEnabled", False),
+            "excluded_events": data.get("excludedEvents", []),
+        }
+
+    def delete_bigquery_link(self, property_id: str, link_id: str) -> bool:
+        """Delete a BigQuery link (v1alpha)."""
+        if not property_id.startswith("properties/"):
+            property_id = f"properties/{property_id}"
+
+        return self._delete_alpha(f"{property_id}/bigQueryLinks/{link_id}")

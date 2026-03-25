@@ -23,6 +23,7 @@ from .config import (
 )
 from .health_cli import health_app
 from .scan_cli import scan_app
+from .bq_cli import bq_app
 from .channels_cli import channels_app
 from .schema_cli import schema_app
 from .shared import (
@@ -97,6 +98,7 @@ app.add_typer(health_app, name="health")
 app.add_typer(scan_app, name="scan")
 app.add_typer(schema_app, name="schema")
 app.add_typer(channels_app, name="channels")
+app.add_typer(bq_app, name="bq")
 
 
 # =============================================================================
@@ -127,6 +129,7 @@ def describe(
         "scan": ["all", "issues", "report", "permissions"],
         "schema": ["export", "deploy"],
         "channels": ["list", "get", "create", "update", "export", "delete", "templates"],
+        "bq": ["status", "link", "freshness", "audit", "query", "cost", "tables", "schema", "datasets", "templates"],
     }
 
     if json_output:
