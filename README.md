@@ -10,6 +10,44 @@ Run health diagnostics across every property in an account. Export a template pr
 
 Supports multi-profile OAuth so you can switch between Google accounts without re-authenticating. Every command outputs structured JSON for scripting and automation.
 
+## Recent Changes
+
+### v0.3.0 (March 2026)
+
+**BigQuery Integration**
+- New `ga4 bq` command group with 10 commands
+- `bq status` — show BQ export link configuration
+- `bq link` — create BQ export links via Admin API
+- `bq freshness` — check data lag on export tables
+- `bq audit` — scan all properties for BQ link gaps
+- `bq query` — run pre-built or custom SQL against GA4 BQ exports
+- `bq cost` — dry-run cost estimation before querying
+- `bq tables` / `bq schema` / `bq datasets` — browse BQ structure
+- 5 query templates: ai-traffic, sessions, top-pages, events, channels
+- Auto-detects GCP project from BQ link (no `--project` needed)
+- BQ REST API client using existing OAuth tokens (no extra deps)
+- 36 automated tests (up from 20)
+
+### v0.2.0 (March 2026)
+
+**Channel Groups**
+- Full CRUD CLI for custom channel groups (list, get, create, update, export, delete)
+- AI Traffic template — creates channel group with AI Traffic above Referral
+- Channel groups integrated into schema export/deploy with idempotent dedup
+
+**Account-Level User Management**
+- All user commands now support `--account`/`-a` for account-level access bindings
+
+**Protocol Compliance**
+- `--fields`, `--quiet`/`-q`, `--limit`/`-n` global flags
+- ID validation, Agent Rules, expanded test suite (4 → 20)
+
+### v0.1.0
+
+- Initial release: auth, properties, accounts, reports, dimensions, metrics
+- Health diagnostics (25 checks, scoring, grading), multi-property scanning
+- Schema export/deploy, multi-profile OAuth, site spider, caching
+
 ## Installation
 
 ```bash
@@ -301,62 +339,6 @@ ga4 -q health summary 123456789 --json
 | Analytics Admin v1beta | `analyticsadmin.googleapis.com/v1beta` | Properties, accounts, schema |
 | Analytics Admin v1alpha | `analyticsadmin.googleapis.com/v1alpha` | Audiences, channels, access bindings, enhanced measurement |
 | Analytics Data v1beta | `analyticsdata.googleapis.com/v1beta` | Reports, dimensions, metrics |
-
-## Recent Changes
-
-### v0.3.0 (March 2026)
-
-**BigQuery Integration**
-- New `ga4 bq` command group with 10 commands
-- `bq status` — show BQ export link configuration
-- `bq link` — create BQ export links via Admin API
-- `bq freshness` — check data lag on export tables
-- `bq audit` — scan all properties for BQ link gaps
-- `bq query` — run pre-built or custom SQL against GA4 BQ exports
-- `bq cost` — dry-run cost estimation before querying
-- `bq tables` / `bq schema` / `bq datasets` — browse BQ structure
-- 5 query templates: ai-traffic, sessions, top-pages, events, channels
-- Auto-detects GCP project from BQ link (no `--project` needed)
-- BQ REST API client using existing OAuth tokens (no extra deps)
-- 36 automated tests (up from 20)
-
-### v0.2.0 (March 2026)
-
-**Channel Groups**
-- Full CRUD CLI for custom channel groups (list, get, create, update, export, delete)
-- AI Traffic template — creates channel group with AI Traffic above Referral
-- Documented GA4 Admin API limitation: only `eachScopeDefaultChannelGroup` supported as filter field
-- Channel groups integrated into schema export/deploy with idempotent dedup
-- Channel groups health check (#25)
-
-**Account-Level User Management**
-- All user commands now support `--account`/`-a` for account-level access bindings
-- Account-level access cascades to all properties under the account
-- Added `delete_account_access_binding` and `batch_create_account_access_bindings`
-
-**Clique Protocol Compliance**
-- Added `--fields` global flag for JSON field selection
-- Added `--quiet`/`-q` global flag to suppress non-essential stderr
-- Added `--limit`/`-n` to users list and channels list
-- Added `validate_id()` for agent safety (rejects `?#%&..` in IDs)
-- Added `## Agent Rules` section to AGENTS.md
-- Added `origin` and updated `resources` in `[tool.clique]` metadata
-- Expanded test suite from 4 to 20 tests
-
-**Schema**
-- Added channel groups to schema export/deploy
-- Added `skipped` tracking for idempotent deploy reporting
-- Added `analytics.edit` OAuth scope for write operations
-
-### v0.1.0
-
-- Initial release with auth, properties, accounts, reports, dimensions, metrics
-- Health diagnostics (25 checks, scoring, grading)
-- Multi-property scanning
-- Schema export/deploy for property replication
-- Multi-profile OAuth authentication
-- Site spider for tag coverage
-- Response caching
 
 ## Protocol
 
