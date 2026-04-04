@@ -34,15 +34,15 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/ga4"]
 
-[tool.clique]
+[tool.forma]
 description = "Google Analytics 4 property management, health diagnostics, schema replication, and reporting"
 resources = ["accounts", "properties", "reports", "dimensions", "metrics", "users", "health", "scan", "schema", "channels", "bq", "cache"]
 auth = "oauth2"
-origin = "clique"
+origin = "forma"
 status = "experimental"
+install = "uv pip install -e ."
 env-key = "GA4_CREDENTIALS_JSON"
 api-url = "https://console.cloud.google.com/apis/credentials"
-system-deps = []
 setup-notes = "Requires OAuth2 credentials JSON from Google Cloud Console"
 
 [tool.ruff]
